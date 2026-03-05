@@ -1,0 +1,439 @@
+use std::{collections::HashMap, io::{BufRead, SeekFrom, Write}};
+
+use mpi::topology::SimpleCommunicator;
+
+use crate::{Mesh, Sparsity, Vector, mesh::{FaceIndex, NodeIndex, Ownership}};
+
+
+
+impl<const DIM: usize> Mesh<DIM> {
+    pub fn write<T: Write>(&self, writer: T) -> Result<(), std::io::Error> {
+        let mut w = writer;
+
+        write!(w, "NDIME={}\n", DIM)?;
+
+        write!(w, "NNODES={}\n", self.n_total_nodes())?;
+        for n in 0..self.n_total_nodes() {
+            let o = self.node_ownership[n];
+            let id = self.node_global_id[n];
+            let n = self.nodes[n];
+
+            n.write_raw_str(&mut w)?;
+
+            write!(w, " {}", id)?;
+            match o {
+                Ownership::Owned => write!(w, " -\n")?,
+                Ownership::Remote(r) => write!(w, " {}\n", r)?,
+            }
+        }
+
+        write!(w, "NFACES={}\n", self.n_total_faces())?;
+        for face in self.iter_all_faces() {
+            write!(w, "{}", face.n_nodes())?;
+            for n in face.nodes() {
+                write!(w, " {}", usize::from(*n))?;
+            }
+            match face.boundary() {
+                Some(v) => write!(w, " {}", v),
+                None => write!(w, " -")
+            }?;
+            
+            write!(w, " {}", face.global_id())?;
+            match face.ownership() {
+                Ownership::Owned => write!(w, " -"),
+                Ownership::Remote(r) => write!(w, " {}", r)
+            }?;
+
+            write!(w, "\n")?;
+        }
+
+        write!(w, "NCELLS={}\n", self.n_total_cells())?;
+        for cell in self.iter_all_cells() {
+            write!(w, "{}", cell.n_faces())?;
+            for f in cell.faces() {
+                write!(w, " {}", usize::from(*f))?;
+            }
+            write!(w, " {}", cell.global_id())?;
+            match cell.ownership() {
+                Ownership::Owned => write!(w, " -"),
+                Ownership::Remote(r) => write!(w, " {}", r)
+            }?;
+            write!(w, "\n")?;
+        }
+
+        Ok(())
+    }
+
+    pub fn read<T: BufRead>(reader: T, mpi_comm: Option<SimpleCommunicator>) -> Result<Self, Box<dyn std::error::Error>> {
+
+
+        let mut mesh = Mesh::new(mpi_comm);
+
+        let mut section = "none".to_string();
+
+        let mut line_id: usize = 0;
+        let mut nodes_to_read = 0;
+        let mut faces_to_read = 0;
+        let mut cells_to_read = 0;
+        for line in reader.lines().map_while(Result::ok) {
+            line_id += 1;
+            let ls = line.trim();
+
+            if ls.len() == 0 {continue}
+
+            if ls.chars().nth(0) == Some('N') {
+                let mut ls = ls.split("=");
+                section = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.to_string();
+                
+                let val: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+
+                if section == "NDIME" {
+                    if val != DIM {
+                        return Err(Box::new(crate::error::Error::WrongMeshFileDimension(val)));
+                    }
+                } else if section == "NNODES" {
+                    nodes_to_read = val;
+                } else if section == "NFACES" {
+                    faces_to_read = val;
+                } else if section == "NCELLS" {
+                    cells_to_read = val;
+                }
+                
+                continue;
+            }
+
+            if section == "none" {
+                continue;
+            }
+
+            if section == "NNODES" {
+
+                if nodes_to_read == 0 {continue}
+
+                // read a node
+                let node: Vector<DIM> = Vector::from_raw_str(ls)?;
+                let mut ls = ls.split(" ");
+                let id: u32 = ls.nth(DIM).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+                let n = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.trim();
+                let ownership = if n == "-" {Ownership::Owned} else {
+                    Ownership::Remote(n.parse()?)
+                };
+                mesh.add_node(node, ownership, Some(id));
+
+                nodes_to_read -= 1;
+            } else if section == "NFACES" {
+                if faces_to_read == 0 {continue}
+
+                let mut ls = ls.split(" ");
+                let size: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+
+                let mut nodes = [NodeIndex::from(0); 64];
+                if size > 64 {
+                    return Err(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }));
+                }
+                for i in 0..size {
+                    let node: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+                    nodes[i] = NodeIndex::from(node);
+                }
+                let tag = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?;
+                let boundary = if tag == "-" {
+                    None
+                } else {
+                    Some(tag.parse()?)
+                };
+
+                let gid: u32 = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+                
+                let tag = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?;
+                let ownership = if tag == "-" {
+                    Ownership::Owned
+                } else {
+                    Ownership::Remote(tag.parse()?)
+                };
+
+                mesh.add_face(&nodes[0..size], boundary, ownership, Some(gid));
+
+                faces_to_read -= 1;
+            } else if section == "NCELLS" {
+                if cells_to_read == 0 {continue}
+
+                let mut ls = ls.split(" ");
+                let size: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+
+                let mut faces = [FaceIndex::from(0); 64];
+                if size > 64 {
+                    return Err(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }));
+                }
+                for i in 0..size {
+                    let face: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+                    faces[i] = FaceIndex::from(face);
+                }
+
+                let gid: u32 = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+                
+                let tag = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?;
+                let ownership = if tag == "-" {
+                    Ownership::Owned
+                } else {
+                    Ownership::Remote(tag.parse()?)
+                };
+
+                mesh.add_cell(&faces[0..size], ownership, Some(gid));
+
+                cells_to_read -= 1;
+            }
+
+        }
+
+
+        mesh.compute()?;
+
+        Ok(mesh)
+    }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+impl<const DIM: usize> Mesh<DIM> {
+
+
+    fn read_su2_nodes<R: std::io::BufRead>(mesh: &mut Mesh<DIM>, reader: &mut R) {
+
+        let mut node: usize = 0;
+        let mut n_nodes: Option<usize> = None;
+        for line in reader.lines() {
+
+            let line = line.expect("unable to read line");
+            
+            match n_nodes {
+                Some(v) => {
+                    if node == v {
+                        return;
+                    }
+
+                    let mut n: Vector<DIM> = Vector::new();
+                    for i in 0..DIM {
+                        n[i] = line.split(" ").nth(i).expect("found value in node").trim().parse().unwrap();
+                    }
+
+                    mesh.add_node(n, Ownership::Owned, None);
+
+                    node += 1;
+                }, 
+                None => {}
+            }
+
+            if line.contains("NPOIN=") {
+                n_nodes = Some(line.split("=").nth(1).expect("found number of nodes").trim().parse().unwrap());
+            }
+
+        }
+
+    }
+
+    fn read_su2_elements<R: std::io::BufRead>(reader: &mut R) -> Result<Vec<super::vtk::VtkElement>, Box<dyn std::error::Error>> {
+
+        let mut elements: Vec<super::vtk::VtkElement> = Vec::new();
+
+        let mut elem: usize = 0;
+        let mut nelem: Option<usize> = None;
+        for line in reader.lines() {
+
+            let line = line.expect("unable to read line");
+            
+            match nelem {
+                Some(v) => {
+                    if elem == v {
+                        break;
+                    }
+
+                    let elem_kind: u8 = line.split(" ").nth(0).expect("found element kind").trim().parse()?;
+
+                    let mut elem_nodes: Vec<usize> = line.split(" ").map(|v| v.parse::<usize>().unwrap()).collect();
+                    elem_nodes.remove(0);
+
+                    elements.push(super::vtk::VtkElement::from_kind_and_nodes(elem_kind, &elem_nodes)?);
+
+                    elem += 1;
+                }, 
+                None => {}
+            }
+
+            if line.contains("NELEM=") {
+                nelem = Some(line.split("=").nth(1).expect("found number of elements").trim().parse()?);
+            }
+
+        }
+
+        Ok(elements)
+    }
+
+
+    fn read_su2_boundaries<R: std::io::BufRead>(reader: &mut R, _mesh: &mut Mesh<DIM>) -> Result<HashMap<Vec<usize>, u16>, Box<dyn std::error::Error>> {
+
+        let mut face_boundaries: HashMap<Vec<usize>, u16> = HashMap::new();
+
+
+        let mut current_mark: Option<u16> = None;
+        let mut current_nelem: Option<usize> = None;
+        let mut current_elem = 0;
+        let mut read_mark_elems = false;
+
+        for line in reader.lines() {
+
+            let line = line.expect("unable to read line");
+            
+            if read_mark_elems {
+                match current_nelem {
+                    None => {},
+                    Some(current_nelem) => {
+                        if current_elem < current_nelem {
+                            //println!("{} {}", current_elem, current_nelem);
+
+                            let mut elem_nodes: Vec<usize> = line.trim().split(" ").map(|v| v.parse::<usize>().unwrap()).collect();
+                            elem_nodes.remove(0);
+                            elem_nodes.sort();
+        
+                            face_boundaries.insert(elem_nodes, current_mark.unwrap());
+        
+                            current_elem += 1;
+                        } else {
+                            read_mark_elems = false;
+                        }
+                    }
+                }
+            }
+
+            if line.contains("MARKER_TAG=") {
+                
+                //let mark_name = line.split("=").nth(1).expect("found marker name").trim();
+                match current_mark {
+                    None => {current_mark = Some(0);}
+                    Some(v) => {current_mark = Some(v + 1);}
+                }
+
+                //println!("mark name = {}", mark_name);
+
+                //let mark_id = current_mark.unwrap();
+
+                //mesh.add_boundary(mark_id, mark_name)?;
+
+                current_elem = 0;
+            }
+
+            if line.contains("MARKER_ELEMS=") {
+                current_nelem = Some(line.split("=").nth(1).expect("found number of elements in marker").trim().parse()?);
+                read_mark_elems = true;
+            }
+            
+        }
+
+        Ok(face_boundaries)
+    }
+
+
+    fn compute_vtk_faces(elements: &Vec<super::vtk::VtkElement>, boundaries: Option<&HashMap<Vec<usize>, u16>>) -> (Sparsity<NodeIndex>, Vec<Option<u16>>, Sparsity<FaceIndex>) {
+        let mut face_nodes = Sparsity::<NodeIndex>::new();
+        let mut elem_faces = Sparsity::<FaceIndex>::new();
+
+        let mut face_hash: HashMap<Vec<usize>, usize> = HashMap::new();
+        let mut face_boundaries: Vec<Option<u16>> = vec![];
+
+        for e in elements {
+
+            let (face_nodes_i, face_starts) = e.faces();
+
+            for i in 0..(face_starts.len() - 1) {
+                let fi = &face_nodes_i[face_starts[i]..face_starts[i+1]];
+
+                let mut f_hash = fi.to_vec();
+                f_hash.sort();
+
+                let fid = match face_hash.get(&f_hash) {
+                    Some(x) => *x,
+                    None => {
+                        // add the face
+                        let id = face_nodes.major_len();
+                        let bnd = match boundaries {
+                            Some(boundaries) => {
+                                match boundaries.get(&f_hash) {Some(v) => Some(*v), None => None}
+                            }, None => None,
+                        };
+                        face_boundaries.push(bnd);
+
+                        face_hash.insert(f_hash, face_nodes.major_len());
+
+                        for ni in fi {
+                            face_nodes.push_to_major(NodeIndex::from(*ni));
+                        }
+                        face_nodes.close_major();
+
+                        id
+                    }
+                };
+
+                elem_faces.push_to_major(FaceIndex::from(fid));
+            }
+
+            elem_faces.close_major();
+
+        }
+
+        (face_nodes, face_boundaries, elem_faces)
+    }
+
+
+    pub fn read_su2<R: std::io::BufRead + std::io::Seek>(mut reader: R, mpi_comm: Option<SimpleCommunicator>) -> Result<Mesh<DIM>, Box<dyn std::error::Error>> {
+
+        let mut mesh = Mesh::new(mpi_comm);
+
+        {
+
+            reader.seek(SeekFrom::Start(0))?;
+
+            Mesh::read_su2_nodes(&mut mesh, &mut reader);
+        }
+
+        let elements = {
+
+            reader.seek(SeekFrom::Start(0))?;
+
+            Mesh::<DIM>::read_su2_elements(&mut reader)?
+        };
+
+        let boundaries = {
+
+            reader.seek(SeekFrom::Start(0))?;
+
+            Mesh::<DIM>::read_su2_boundaries(&mut reader, &mut mesh)?
+        };
+
+        {
+            let (face_nodes, face_boundaries, elem_faces) = Mesh::<DIM>::compute_vtk_faces(&elements, Some(&boundaries));
+            for i in 0..face_nodes.major_len() {
+                mesh.add_face(face_nodes.major_range(i), face_boundaries[i], Ownership::Owned, None);
+            }
+            for i in 0..elem_faces.major_len() {
+                mesh.add_cell(elem_faces.major_range(i), Ownership::Owned, None);
+            }
+        }
+
+        mesh.compute()?;
+
+        Ok(mesh)
+    }
+}
+
+
+
+
