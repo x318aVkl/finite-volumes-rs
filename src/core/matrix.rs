@@ -2,7 +2,7 @@
 
 use mpi::traits::Equivalence;
 
-use crate::{Vector, error::Error};
+use crate::core::{Vector, error::Error, traits::FloatBuffered};
 
 
 /// Small f64 matrix of size M rows by N columns. Used to represent tensors, gradients of vector fields...
@@ -247,6 +247,42 @@ impl<const M: usize, const N: usize, const K: usize> std::ops::Mul<Matrix<K, N>>
 
 
 
+
+pub struct DynamicMatrix {
+    data: Vec<f64>,
+    cols: usize,
+}
+
+
+impl DynamicMatrix {
+    pub fn new(m: usize, n: usize) -> Self {
+        Self {
+            data: vec![0.0; m*n],
+            cols: n,
+        }
+    }
+    pub fn nrows(&self) -> usize {
+        self.data.len() / self.cols
+    }
+    pub fn ncols(&self) -> usize {
+        self.cols
+    }
+}
+
+impl std::ops::Index<[usize; 2]> for DynamicMatrix {
+    type Output = f64;
+    fn index(&self, index: [usize; 2]) -> &Self::Output {
+        &self.data[index[0]*self.cols + index[1]]
+    }
+}
+
+impl std::ops::IndexMut<[usize; 2]> for DynamicMatrix {
+    fn index_mut(&mut self, index: [usize; 2]) -> &mut Self::Output {
+        &mut self.data[index[0]*self.cols + index[1]]
+    }
+}
+
+
 // square matrices decompositions and operations
 impl<const N: usize> Matrix<N, N> {
 
@@ -323,6 +359,55 @@ impl<const N: usize> Matrix<N, N> {
         }
 
         Ok(out)
+    }
+
+
+        pub fn det(mut self) -> Result<f64, Error> {
+
+        // compute reduce row echelon form
+        let mut p: [usize; N] = [0; N];
+        for i in 0..N {
+            p[i] = i;
+        }
+
+        let mut pdet = 1.0;
+        for k in 0..(N-1) {
+            let piv = self[[k, k]];
+
+            if piv.abs() < 1e-14 {
+                // swap with largest
+                let mut maxi = k;
+                let mut maxp = piv.abs();
+                for j in (k+1)..N {
+                    let pj = self[[k, j]].abs();
+                    if pj > maxp {
+                        maxi = j;
+                        maxp = pj;
+                    }
+                }
+                if maxi == k {
+                    return Err(Error::SingularMatrix);
+                }
+                // swap rows
+                self.rows.swap(k, maxi);
+                p.swap(k, maxi);
+                pdet *= -1.0;
+            }
+            let piv = self[[k, k]];
+
+            for i in (k+1)..N {
+                let f = - self[[i, k]] / piv;
+
+                self.rows[i] += self.rows[k] * f;
+            }
+        }
+
+        let mut det = pdet;
+        for k in 0..N {
+            det *= self[[k, k]];
+        }
+
+        Ok(det)
     }
 
 
@@ -440,5 +525,30 @@ unsafe impl<const M: usize, const N: usize> Equivalence for Matrix<M, N> {
     type Out = mpi::datatype::UserDatatype;
     fn equivalent_datatype() -> Self::Out {
         mpi::datatype::UserDatatype::contiguous((M*N) as i32, &f64::equivalent_datatype())
+    }
+}
+
+
+impl<const M: usize, const N: usize> FloatBuffered for Matrix<M, N> {
+    fn f64_buffer_size() -> usize {
+        M*N
+    }
+    fn put_in_f64_buffer(&self, buffer: &mut [f64]) {
+        assert!(buffer.len() >= N);
+        for i in 0..M {
+            for j in 0..N {
+                buffer[i*N+j] = self[[i, j]];
+            }
+        }
+    }
+    fn build_from_f64_buffer(buffer: &[f64]) -> Self {
+        assert!(buffer.len() >= N);
+        let mut out = Self::new();
+        for i in 0..M {
+            for j in 0..N {
+                out[[i, j]] = buffer[i*N+j];
+            }
+        }
+        out
     }
 }

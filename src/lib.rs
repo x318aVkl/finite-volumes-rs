@@ -1,13 +1,28 @@
-pub mod mesh;
-pub mod sparsity;
-pub mod vector;
-pub mod matrix;
-pub mod error;
-pub mod field;
-pub mod communicator;
-pub mod integrate;
+pub mod core;
+pub mod linalg;
+pub mod fvm;
+pub mod post;
 
-pub use sparsity::Sparsity;
-pub use vector::Vector;
-pub use matrix::Matrix;
-pub use mesh::Mesh;
+pub use core::{
+    mesh::Mesh,
+    vector::Vector,
+    matrix::Matrix,
+    field::Field,
+};
+
+
+pub mod error {
+    pub use crate::core::error::Error;
+}
+
+pub mod prelude {
+
+    pub use super::Vector;
+    pub use super::Matrix;
+    pub use super::Mesh;
+    pub use super::Field;
+    pub use super::core::evaluator::Evaluator;
+
+    pub use super::core::mesh::geometry;
+
+}

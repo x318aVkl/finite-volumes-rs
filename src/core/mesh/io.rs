@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::{BufRead, SeekFrom, Write}};
 
 use mpi::topology::SimpleCommunicator;
 
-use crate::{Mesh, Sparsity, Vector, mesh::{FaceIndex, NodeIndex, Ownership}};
+use crate::{Mesh, core::Sparsity, Vector, core::mesh::{FaceIndex, NodeIndex, Ownership}};
 
 
 
@@ -14,17 +14,11 @@ impl<const DIM: usize> Mesh<DIM> {
 
         write!(w, "NNODES={}\n", self.n_total_nodes())?;
         for n in 0..self.n_total_nodes() {
-            let o = self.node_ownership[n];
-            let id = self.node_global_id[n];
             let n = self.nodes[n];
 
             n.write_raw_str(&mut w)?;
 
-            write!(w, " {}", id)?;
-            match o {
-                Ownership::Owned => write!(w, " -\n")?,
-                Ownership::Remote(r) => write!(w, " {}\n", r)?,
-            }
+            write!(w, "\n")?;
         }
 
         write!(w, "NFACES={}\n", self.n_total_faces())?;
@@ -112,13 +106,7 @@ impl<const DIM: usize> Mesh<DIM> {
 
                 // read a node
                 let node: Vector<DIM> = Vector::from_raw_str(ls)?;
-                let mut ls = ls.split(" ");
-                let id: u32 = ls.nth(DIM).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
-                let n = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.trim();
-                let ownership = if n == "-" {Ownership::Owned} else {
-                    Ownership::Remote(n.parse()?)
-                };
-                mesh.add_node(node, ownership, Some(id));
+                mesh.add_node(node);
 
                 nodes_to_read -= 1;
             } else if section == "NFACES" {
@@ -226,7 +214,7 @@ impl<const DIM: usize> Mesh<DIM> {
                         n[i] = line.split(" ").nth(i).expect("found value in node").trim().parse().unwrap();
                     }
 
-                    mesh.add_node(n, Ownership::Owned, None);
+                    mesh.add_node(n);
 
                     node += 1;
                 }, 
@@ -349,6 +337,11 @@ impl<const DIM: usize> Mesh<DIM> {
         let mut face_hash: HashMap<Vec<usize>, usize> = HashMap::new();
         let mut face_boundaries: Vec<Option<u16>> = vec![];
 
+        // add all the internal faces, and then the boundary faces
+        let mut bnd_face_nodes = Sparsity::<NodeIndex>::new();
+
+        let mut face_unique_id: usize = 0;
+        let mut face_unique_to_final_id = vec![];
         for e in elements {
 
             let (face_nodes_i, face_starts) = e.faces();
@@ -363,7 +356,8 @@ impl<const DIM: usize> Mesh<DIM> {
                     Some(x) => *x,
                     None => {
                         // add the face
-                        let id = face_nodes.major_len();
+                        let id = face_unique_id;
+                        face_unique_id += 1;
                         let bnd = match boundaries {
                             Some(boundaries) => {
                                 match boundaries.get(&f_hash) {Some(v) => Some(*v), None => None}
@@ -371,12 +365,24 @@ impl<const DIM: usize> Mesh<DIM> {
                         };
                         face_boundaries.push(bnd);
 
-                        face_hash.insert(f_hash, face_nodes.major_len());
+                        face_hash.insert(f_hash, id);
 
-                        for ni in fi {
-                            face_nodes.push_to_major(NodeIndex::from(*ni));
+                        match bnd {
+                            Some(_) => {
+                                face_unique_to_final_id.push(bnd_face_nodes.major_len());
+                                for ni in fi {
+                                    bnd_face_nodes.push_to_major(NodeIndex::from(*ni));
+                                }
+                                bnd_face_nodes.close_major();
+                            },
+                            None => {
+                                face_unique_to_final_id.push(face_nodes.major_len());
+                                for ni in fi {
+                                    face_nodes.push_to_major(NodeIndex::from(*ni));
+                                }
+                                face_nodes.close_major();
+                            }
                         }
-                        face_nodes.close_major();
 
                         id
                     }
@@ -386,7 +392,36 @@ impl<const DIM: usize> Mesh<DIM> {
             }
 
             elem_faces.close_major();
+        }
 
+        // Add to the boundary face ids the number of no boundary faces, to put them at the end
+        let n_nobnd_faces = face_nodes.major_len();
+        for i in 0..face_unique_to_final_id.len() {
+            if face_boundaries[i].is_some() {
+                face_unique_to_final_id[i] += n_nobnd_faces;
+            }
+        }
+        // add the nodes of the boundary faces to the face_nodes
+        for i in 0..bnd_face_nodes.major_len() {
+            for j in bnd_face_nodes.major_range(i) {
+                face_nodes.push_to_major(*j);
+            }
+            face_nodes.close_major();
+        }
+        // update the elem faces to have new final ids
+        for i in 0..elem_faces.major_len() {
+            for k in elem_faces.major_start(i)..elem_faces.major_end(i) {
+                let f = elem_faces.flat_index(k);
+                *elem_faces.flat_index_mut(k) = FaceIndex::from(face_unique_to_final_id[usize::from(f)]);
+            }
+        }
+        // rebuild the face boundaries
+        let old_face_boundaries = face_boundaries;
+        let mut face_boundaries = vec![None; old_face_boundaries.len()];
+        for i in 0..old_face_boundaries.len() {
+            let bnd = old_face_boundaries[i];
+            let f = face_unique_to_final_id[i];
+            face_boundaries[f] = bnd;
         }
 
         (face_nodes, face_boundaries, elem_faces)
@@ -435,5 +470,55 @@ impl<const DIM: usize> Mesh<DIM> {
 }
 
 
+
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+
+    fn check_square_mesh<const DIM: usize>(mesh: &Mesh<DIM>) {
+        assert_eq!(mesh.n_nodes(), 121);
+        assert_eq!(mesh.n_faces(), 220);
+        assert_eq!(mesh.n_cells(), 100);
+
+        let mut total_volume = 0.0;
+        for cell in mesh.iter_cells() {
+            total_volume += cell.volume();
+        }
+
+        assert!((total_volume - 1.0).abs() < f64::EPSILON*10.0);
+
+        let mut total_sf = Vector::new();
+        for face in mesh.iter_faces() {
+            if face.boundary().is_some() {
+                total_sf += face.normal() * face.area();
+            }
+        }
+
+        assert!(total_sf.norm() < f64::EPSILON*10.0);
+    }
+
+    #[test]
+    fn read_write_square_mesh() {
+
+        let mesh = super::super::examples::square().unwrap();
+
+        check_square_mesh(&mesh);
+
+        let buffer = vec![];
+        let mut writer = std::io::BufWriter::new(buffer);
+        mesh.write(&mut writer).unwrap();
+
+        let bytes = writer.into_inner().unwrap();
+        let result_string = String::from_utf8(bytes).unwrap();
+
+        let mesh: Mesh<2> = Mesh::read(std::io::BufReader::new(std::io::Cursor::new(result_string.as_str())), None).unwrap();
+
+        check_square_mesh(&mesh);
+        
+    }
+
+}
 
 

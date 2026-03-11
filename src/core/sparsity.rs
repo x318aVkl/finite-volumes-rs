@@ -63,6 +63,11 @@ impl<T: PartialOrd + Ord + Clone + Copy + std::ops::Add<Output = T> + From<usize
         self.minors[k]
     }
 
+    /// Mutable acces a minor index using flat indexes, like the ones returned by major_start()
+    pub fn flat_index_mut(&mut self, k: usize) -> &mut T {
+        &mut self.minors[k]
+    }
+
     /// Inserts a minor index to the given major index. This is O(N).
     /// - Returns: Ok(pos) if the pair (major, minor) was not already present in the sparsity. pos si a flat index representing the position of the added value in the minors data.
     /// - Returns: Err(pos) if the pair (major, minor) was already present in the sparsity. The value in minors at that position is not updated.

@@ -3,10 +3,10 @@ use std::marker::PhantomData;
 use std::ops::Range;
 
 use crate::Mesh;
-use crate::mesh::Geometry;
-use crate::mesh::GlobalRelation;
-use crate::mesh::MeshGet;
-use crate::mesh::Ownership;
+use crate::core::mesh::Geometry;
+use crate::core::mesh::GlobalRelation;
+use crate::core::mesh::MeshGet;
+use crate::core::mesh::Ownership;
 
 
 use mpi::topology::Communicator as MpiCommunicator;
@@ -23,44 +23,48 @@ pub struct SingleDataCommunicator<'a> {
 }
 
 
-struct SendCommunicator {
+#[derive(Clone)]
+struct OneRankCommunicator {
     
     other_rank: usize,
 
     send_ids: Vec<usize>,
 
-}
-
-struct RecvCommunicator {
-    
-    other_rank: usize,
     recv_range: Range<usize>,
 
 }
 
 
-pub(crate) struct Communicator<'a, G: Geometry<DIM>, const DIM: usize> {
 
+pub struct Communicator<G: Geometry<DIM>, const DIM: usize> {
 
-    send_comms: Vec<SendCommunicator>,
+    comms: Vec<OneRankCommunicator>,
 
-    recv_comms: Vec<RecvCommunicator>,
-
-    mpi_comm: Option<&'a SimpleCommunicator>,
+    mpi_comm: Option<SimpleCommunicator>,
 
     gp: PhantomData<G>,
 
 }
 
+impl<G: Geometry<DIM>, const DIM: usize> Clone for Communicator<G, DIM> {
+    fn clone(&self) -> Self {
+        Self {
+            comms: self.comms.clone(),
+            mpi_comm: match self.mpi_comm.as_ref() {Some(m) => Some(m.duplicate()), None => None},
+            gp: self.gp
+        }
+    }
+}
 
-impl<'a, I, E, G: Geometry<DIM, IndexType = I, ElementType<'a> = E>, const DIM: usize> Communicator<'a, G, DIM>
-where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
 
-    pub fn from_mesh(mesh: &'a Mesh<DIM>) -> Self {
+impl<'a, I, G: Geometry<DIM, IndexType = I>, const DIM: usize> Communicator<G, DIM>
+where Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
+
+    pub fn from_mesh(mesh: &Mesh<DIM>) -> Self {
 
         let comm = match mesh.communicator() {
-            Some(v) => v,
-            None => return Self {send_comms: vec![], recv_comms: vec![], mpi_comm: mesh.communicator(), gp: PhantomData }
+            Some(v) => v.duplicate(),
+            None => return Self {comms: vec![], mpi_comm: mesh.communicator_clone(), gp: PhantomData }
         };
 
         let mut send_local_ids: HashMap<usize, Vec<usize>> = HashMap::new();
@@ -90,9 +94,9 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
 
         //let sizes: HashMap<usize, usize> = send_global_ids.iter().map(|(rank, global_ids)| (*rank, global_ids.len())).collect();
 
-        let mut sizes_we_need = vec![0; comm.size() as usize];
+        let mut sizes_we_need: HashMap<usize, usize> = HashMap::new();
         for (r, buff) in send_global_ids.iter() {
-            sizes_we_need[*r] = buff.len();
+            sizes_we_need.insert(*r, buff.len());
         }
 
         mpi::request::scope(|scope| {
@@ -101,18 +105,17 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
             //let requests: Vec<_> = send_global_ids.iter().map(|(rank, _global_ids)| {
             //    comm.process_at_rank(*rank as i32).immediate_send_with_tag::<_, usize>(scope, sizes.get(rank).expect("contains rank"), 0)
             //}).collect();
-            let requests: Vec<_> = (0..(comm.size() as usize)).map(|rank| {
-                comm.process_at_rank(rank as i32).immediate_send_with_tag::<_, usize>(scope, &sizes_we_need[rank], 0)
+            let requests: Vec<_> = sizes_we_need.iter().map(|(rank, size)| {
+                comm.process_at_rank(*rank as i32).immediate_send_with_tag::<_, usize>(scope, size, 0)
             }).collect();
 
             // recieve the sizes and build the buffers
-            let mut recv_ranks = vec![];
-            (0..(comm.size() as usize)).map(|rank| {
+            sizes_we_need.iter().map(|(rank, _)| {
+                let rank = *rank;
                 let mut slen = 0;
                 comm.process_at_rank(rank as i32).receive_into_with_tag::<usize>(&mut slen, 0);
                 if slen > 0 {
                     recv_global_ids.insert(rank, vec![0; slen]);
-                    recv_ranks.push(rank);
                 }
             }).count();
             // send_local_ids.iter().map(|(rank, _local_ids)| {
@@ -131,9 +134,8 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
                 comm.process_at_rank(*rank as i32).immediate_send_with_tag::<_, [usize]>(scope, &global_ids, 0)
             }).collect();
 
-
             // recieve them
-            recv_ranks.iter().map(|rank| {
+            send_global_ids.iter().map(|(rank, _)| {
                 let mut buffer = recv_global_ids.get_mut(rank).expect("recv global ids contains rank");
                 comm.process_at_rank(*rank as i32).receive_into_with_tag::<[usize]>(&mut buffer, 0);
             }).count();
@@ -161,19 +163,15 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
         }
             
 
-        let send_comms: Vec<SendCommunicator> = recv_local_ids.into_iter().map(|(rank, recv_local_ids)| {
-            SendCommunicator { other_rank: rank, send_ids: recv_local_ids.clone(), }
-        }).collect();
-
-        let recv_comms: Vec<RecvCommunicator> = send_local_ids.into_iter().map(|(rank, send_local_ids)| {
+        let comms: Vec<OneRankCommunicator> = recv_local_ids.into_iter().map(|(rank, recv_local_ids)| {
+            let send_local_ids = send_local_ids.get(&rank).unwrap();
             let recv_start = *send_local_ids.iter().min().unwrap();
             let recv_end = *send_local_ids.iter().max().unwrap();
-            RecvCommunicator { other_rank: rank, recv_range: recv_start..(recv_end+1) }
+            OneRankCommunicator { other_rank: rank, send_ids: recv_local_ids.clone(), recv_range: recv_start..(recv_end+1) }
         }).collect();
         
         Self {
-            send_comms: send_comms,
-            recv_comms: recv_comms,
+            comms,
             mpi_comm: Some(comm),
             gp: PhantomData,
         }
@@ -190,12 +188,12 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
         // create the send buffers
         let mut send_buffers: Vec<Vec<T>> = vec![];
 
-        for comm in &self.send_comms {
+        for comm in &self.comms {
             send_buffers.push(vec![T::default(); comm.send_ids.len()]);
         }
 
         // fill the send buffers
-        for (k, comm) in self.send_comms.iter().enumerate() {
+        for (k, comm) in self.comms.iter().enumerate() {
             for (i, idx) in comm.send_ids.iter().enumerate() {
                 send_buffers[k][i] = data[*idx].clone();
             }
@@ -204,12 +202,12 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
         mpi::request::scope(|scope| {
 
             // send the data
-            let requests = self.send_comms.iter().enumerate().map(|(k, comm)| {
+            let requests = self.comms.iter().enumerate().map(|(k, comm)| {
                 mpi_comm.process_at_rank(comm.other_rank as i32).immediate_send_with_tag::<_, [T]>(scope, &send_buffers[k], 0)
             }).collect::<Vec<_>>();
 
             // receive the data
-            self.recv_comms.iter().enumerate().map(|(_k, comm)| {
+            self.comms.iter().enumerate().map(|(_k, comm)| {
                 mpi_comm.process_at_rank(comm.other_rank as i32).receive_into_with_tag::<[T]>(&mut data[comm.recv_range.clone()], 0);
             }).count();
 
@@ -220,6 +218,11 @@ where E: GlobalRelation, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<
         });
 
         // all done!
+    }
+
+
+    pub fn single(&'a self) -> SingleDataCommunicator<'a> {
+        SingleDataCommunicator { mpi_comm: self.mpi_comm.as_ref() }
     }
 
 }

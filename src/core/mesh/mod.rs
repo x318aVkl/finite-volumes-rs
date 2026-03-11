@@ -1,17 +1,23 @@
 
 
+
+
+
 mod vtk;
 pub mod io;
 pub mod decompose;
 pub mod geometry;
 pub mod compute;
+pub mod examples;
+
+use std::usize;
 
 pub use geometry::Geometry;
 
 
-use mpi::topology::SimpleCommunicator;
+use mpi::{topology::SimpleCommunicator, traits::Communicator};
 
-use crate::{Sparsity, Vector, communicator::SingleDataCommunicator};
+use crate::core::{Sparsity, Vector, communicator::SingleDataCommunicator};
 
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -100,6 +106,14 @@ impl std::fmt::Display for CellIndex {
 
 
 #[derive(Clone, Copy, Debug)]
+pub enum FaceNeighbor {
+    Boundary(u16),
+    Cell(CellIndex),
+    None,
+}
+
+
+#[derive(Clone, Copy, Debug)]
 pub struct CellData<const DIM: usize> {
     volume: f64,
     center: Vector<DIM>,
@@ -112,6 +126,8 @@ pub struct FaceData<const DIM: usize> {
     area: f64,
     center: Vector<DIM>,
     normal: Vector<DIM>,
+    owner_cell: CellIndex,
+    neighbor: FaceNeighbor,
     ownership: Ownership,
     global_id: u32,
 }
@@ -127,7 +143,6 @@ pub struct NodeRef<'a, const DIM: usize> {
 pub struct CellRef<'a, const DIM: usize> {
     id: CellIndex,
     data: &'a CellData<DIM>,
-    nodes: &'a [NodeIndex],
     faces: &'a [FaceIndex],
     mesh: &'a Mesh<DIM>,
 }
@@ -168,37 +183,26 @@ impl<'a, const DIM: usize> std::fmt::Debug for CellRef<'a, DIM> {
 pub struct Mesh<const DIM: usize> {
 
     nodes: Vec<Vector<DIM>>,
-    node_ownership: Vec<Ownership>,
-    node_global_id: Vec<u32>,
-
-    // node to node connectivity, includes own node
-    node_to_node: Sparsity<NodeIndex>,
 
     face_nodes: Sparsity<NodeIndex>,
-
     cell_faces: Sparsity<FaceIndex>,
-
-    cell_nodes: Sparsity<NodeIndex>,
 
     // cell to cell connectivity, includes own cell
     cell_to_cell: Sparsity<CellIndex>,
 
-    /// One vector per node for each cell
-    /// - grad(q)_cell = sum_cell grad_n * q_n
-    cell_node_gradient_coefficients: Vec<Vector<DIM>>,
+    /// One vector per connected cell for each cell
+    cell_face_gradient_coefficients: Vec<Vector<DIM>>,
+    cell_diag_gradient_coefficients: Vec<Vector<DIM>>,
 
     face_data: Vec<FaceData<DIM>>,
     cell_data: Vec<CellData<DIM>>,
 
     face_boundaries: Vec<Option<u16>>,
 
-
-    n_local_nodes: usize,
     n_local_faces: usize,
     n_local_cells: usize,
 
     computed: bool,
-
 
     mpi_comm: Option<SimpleCommunicator>,
 
@@ -214,12 +218,6 @@ impl<'a, const DIM: usize> NodeRef<'a, DIM> {
     }
     pub fn center(&self) -> Vector<DIM> {
         self.position()
-    }
-    pub fn global_id(&self) -> u32 {
-        self.mesh.node_global_id[usize::from(self.id)]
-    }
-    pub fn ownership(&self) -> Ownership {
-        self.mesh.node_ownership[usize::from(self.id)]
     }
 }
 
@@ -262,6 +260,37 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
     pub fn ownership(&self) -> Ownership {
         self.data.ownership
     }
+    pub fn other_cell(&self, cell: CellIndex) -> Option<CellIndex> {
+        match self.data.neighbor {
+            FaceNeighbor::Boundary(_) => None,
+            FaceNeighbor::None => None,
+            FaceNeighbor::Cell(c1) => {
+                if cell == c1 {
+                    Some(self.data.owner_cell)
+                } else {
+                    Some(c1)
+                }
+            }
+        }
+    }
+    pub fn fully_remote(&self) -> bool {
+        let owner_remote = !self.mesh.cell(self.data.owner_cell).owned();
+        match self.data.neighbor {
+            FaceNeighbor::Cell(c) => {
+                let neighbor_remote = !self.mesh.cell(c).owned();
+                owner_remote & neighbor_remote
+            },
+            _ => {
+                owner_remote
+            }
+        }
+    }
+    pub fn owner(&self) -> CellIndex {
+        self.data.owner_cell
+    }
+    pub fn neighbor(&self) -> FaceNeighbor {
+        self.data.neighbor
+    }
 }
 
 impl<'a, const DIM: usize> CellRef<'a, DIM> {
@@ -274,12 +303,6 @@ impl<'a, const DIM: usize> CellRef<'a, DIM> {
     pub fn volume(&self) -> f64 {
         self.data.volume
     }
-    pub fn nodes(&self) -> &[NodeIndex] {
-        self.nodes
-    }
-    pub fn n_nodes(&self) -> usize {
-        self.nodes.len()
-    }
     pub fn faces(&self) -> &[FaceIndex] {
         self.faces
     }
@@ -289,20 +312,29 @@ impl<'a, const DIM: usize> CellRef<'a, DIM> {
     pub fn node(&self, node: NodeIndex) -> NodeRef<'a, DIM> {
         self.mesh.node(node)
     }
-    pub fn iter_grad(&self) -> impl Iterator<Item = (NodeIndex, Vector<DIM>)> {
-        (self.mesh.cell_nodes.major_start(usize::from(self.id))..self.mesh.cell_nodes.major_end(usize::from(self.id)))
+    pub fn iter_grad(&self) -> impl Iterator<Item = (FaceIndex, Vector<DIM>)> {
+        (self.mesh.cell_faces.major_start(usize::from(self.id))..self.mesh.cell_faces.major_end(usize::from(self.id)))
         .map(|k| {
             (
-                self.mesh.cell_nodes.flat_index(k),
-                self.mesh.cell_node_gradient_coefficients[k]
+                self.mesh.cell_faces.flat_index(k),
+                self.mesh.cell_face_gradient_coefficients[k]
             )
         })
+    }
+    pub fn own_grad(&self) -> Vector<DIM> {
+        self.mesh.cell_diag_gradient_coefficients[usize::from(self.id)]
     }
     pub fn global_id(&self) -> u32 {
         self.data.global_id
     }
     pub fn ownership(&self) -> Ownership {
         self.data.ownership
+    }
+    pub fn owned(&self) -> bool {
+        match self.data.ownership {
+            Ownership::Owned => true,
+            _ => false,
+        }
     }
 }
 
@@ -312,18 +344,14 @@ impl<const DIM: usize> Mesh<DIM> {
     pub fn new(mpi_comm: Option<SimpleCommunicator>) -> Self {
         Self {
             nodes: vec![],
-            node_ownership: vec![],
-            node_global_id: vec![],
-            node_to_node: Sparsity::new(),
             face_nodes: Sparsity::new(),
             cell_faces: Sparsity::new(),
-            cell_nodes: Sparsity::new(),
             cell_to_cell: Sparsity::new(),
-            cell_node_gradient_coefficients: vec![],
+            cell_face_gradient_coefficients: vec![],
+            cell_diag_gradient_coefficients: vec![],
             face_data: vec![],
             cell_data: vec![],
             face_boundaries: vec![],
-            n_local_nodes: 0,
             n_local_faces: 0,
             n_local_cells: 0,
             computed: false,
@@ -331,20 +359,11 @@ impl<const DIM: usize> Mesh<DIM> {
         }
     }
 
-    pub fn add_node(&mut self, node: Vector<DIM>, ownership: Ownership, global_id: Option<u32>) {
+    pub fn add_node(&mut self, node: Vector<DIM>) {
         self.computed = false;
 
         self.nodes.push(node);
-        self.node_ownership.push(ownership);
 
-        match ownership {
-            Ownership::Owned => self.n_local_nodes += 1,
-            _ => {}
-        }
-        match global_id {
-            Some(v) => self.node_global_id.push(v),
-            None => self.node_global_id.push((self.nodes.len() - 1) as u32),
-        }
     }
 
     pub fn add_face(&mut self, nodes: &[NodeIndex], boundary: Option<u16>, ownership: Ownership, global_id: Option<u32>) {
@@ -368,6 +387,8 @@ impl<const DIM: usize> Mesh<DIM> {
             area: 0.0, 
             center: Vector::new(), 
             normal: Vector::new(), 
+            owner_cell: CellIndex(usize::MAX),
+            neighbor: match boundary {Some(i) => FaceNeighbor::Boundary(i), None => FaceNeighbor::None},
             ownership, 
             global_id: match global_id {
                 Some(v) => v,
@@ -399,11 +420,28 @@ impl<const DIM: usize> Mesh<DIM> {
                 Some(v) => v,
                 None => cid,
             } 
-        })
+        });
+
+        // set the face owner or neighbor to be this cell
+        for f in faces {
+            let fi = usize::from(*f);
+            if usize::from(self.face_data[fi].owner_cell) == usize::MAX {
+                self.face_data[fi].owner_cell = CellIndex(self.cell_data.len() - 1);
+            } else {
+                match self.face_data[fi].neighbor {
+                    FaceNeighbor::None => {
+                        self.face_data[fi].neighbor = FaceNeighbor::Cell(CellIndex(self.cell_data.len() - 1));
+                    },
+                    _ => {
+                        panic!("Error, trying to add another cell to a face with neighbor: {:?}", self.face_data[fi].neighbor);
+                    }
+                }
+            }
+        }
     }
 
     pub fn n_nodes(&self) -> usize {
-        self.n_local_nodes
+        self.nodes.len()
     }
 
     pub fn n_total_nodes(&self) -> usize {
@@ -437,7 +475,6 @@ impl<const DIM: usize> Mesh<DIM> {
         CellRef {
             id: cell,
             data: &self.cell_data[usize::from(cell)],
-            nodes: self.cell_nodes.major_range(usize::from(cell)),
             faces: self.cell_faces.major_range(usize::from(cell)),
             mesh: &self,
         }
@@ -453,7 +490,7 @@ impl<const DIM: usize> Mesh<DIM> {
     }
 
     pub fn iter_nodes<'a>(&'a self) -> NodeIterator<'a, DIM> {
-        NodeIterator { current: 0, mesh: self, skip_remote: true, }
+        NodeIterator { current: 0, mesh: self, }
     }
 
     pub fn iter_faces<'a>(&'a self) -> FaceIterator<'a, DIM> {
@@ -465,7 +502,7 @@ impl<const DIM: usize> Mesh<DIM> {
     }
 
     pub fn iter_all_nodes<'a>(&'a self) -> NodeIterator<'a, DIM> {
-        NodeIterator { current: 0, mesh: self, skip_remote: false, }
+        NodeIterator { current: 0, mesh: self, }
     }
 
     pub fn iter_all_faces<'a>(&'a self) -> FaceIterator<'a, DIM> {
@@ -480,9 +517,19 @@ impl<const DIM: usize> Mesh<DIM> {
         self.mpi_comm.as_ref()
     }
 
+    pub fn communicator_clone(&self) -> Option<SimpleCommunicator> {
+        match &self.mpi_comm {
+            Some(v) => Some(v.duplicate()),
+            None => None,
+        }
+    }
 
     pub fn comm<'a>(&'a self) -> SingleDataCommunicator<'a> {
         SingleDataCommunicator::from_mpi_comm(self.mpi_comm.as_ref())
+    }
+
+    pub fn cell_to_cell_sparsity(&self) -> &Sparsity<CellIndex> {
+        &self.cell_to_cell
     }
 
 }
@@ -521,18 +568,6 @@ pub trait GlobalRelation {
 }
 
 
-impl<'a, const DIM: usize> GlobalRelation for NodeRef<'a, DIM> {
-    fn local_id(&self) -> usize {
-        usize::from(self.id)
-    }
-    fn global_id(&self) -> u32 {
-        self.global_id()
-    }
-    fn ownership(&self) -> Ownership {
-        self.ownership()
-    }
-}
-
 impl<'a, const DIM: usize> GlobalRelation for FaceRef<'a, DIM> {
     fn local_id(&self) -> usize {
         usize::from(self.id)
@@ -563,13 +598,12 @@ impl<'a, const DIM: usize> GlobalRelation for CellRef<'a, DIM> {
 pub struct NodeIterator<'a, const DIM: usize> {
     current: usize,
     mesh: &'a Mesh<DIM>,
-    skip_remote: bool,
 }
 
 impl<'a, const DIM: usize> Iterator for NodeIterator<'a, DIM> {
     type Item = NodeRef<'a, DIM>;
     fn next(&mut self) -> Option<Self::Item> {
-        if (self.current >= self.mesh.n_total_nodes()) || (self.skip_remote && (!self.mesh.node(self.current.into()).ownership().owned())) {
+        if self.current >= self.mesh.n_total_nodes() {
             None
         } else {
             let out = 
@@ -591,8 +625,11 @@ pub struct FaceIterator<'a, const DIM: usize> {
 impl<'a, const DIM: usize> Iterator for FaceIterator<'a, DIM> {
     type Item = FaceRef<'a, DIM>;
     fn next(&mut self) -> Option<Self::Item> {
-        if (self.current >= self.mesh.n_total_faces()) || (self.skip_remote && (!self.mesh.face(self.current.into()).ownership().owned())) {
+        if self.current >= self.mesh.n_total_faces() {
             None
+        } else if self.skip_remote && self.mesh.face(self.current.into()).fully_remote() {
+            self.current += 1;
+            self.next()
         } else {
             let out = 
                 self.mesh.face(self.current.into())

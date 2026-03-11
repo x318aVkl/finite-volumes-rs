@@ -1,5 +1,7 @@
 use mpi::traits::Equivalence;
 
+use crate::core::traits::FloatBuffered;
+
 
 
 /// Small vector used to represent velocity, f64 field gradients, points in 2D or 3D space...
@@ -116,6 +118,14 @@ impl<const N: usize> Vector<N> {
             max = max.max(self.data[i]);
         }
         max
+    }
+
+    pub fn self_min(self) -> f64 {
+        let mut min = self.data[0];
+        for i in 1..N {
+            min = min.min(self.data[i]);
+        }
+        min
     }
 
     pub fn data(&self) -> &[f64] {
@@ -386,3 +396,29 @@ unsafe impl<const N: usize> Equivalence for Vector<N> {
         mpi::datatype::UserDatatype::contiguous(N as i32, &f64::equivalent_datatype())
     }
 }
+
+
+impl<const N: usize> FloatBuffered for Vector<N> {
+    fn f64_buffer_size() -> usize {
+        N
+    }
+    fn put_in_f64_buffer(&self, buffer: &mut [f64]) {
+        assert!(buffer.len() >= N);
+        for i in 0..N {
+            buffer[i] = self[i];
+        }
+    }
+    fn build_from_f64_buffer(buffer: &[f64]) -> Self {
+        assert!(buffer.len() >= N);
+        let mut out = Self::new();
+        for i in 0..N {
+            out[i] = buffer[i];
+        }
+        out
+    }
+}
+
+
+
+
+
