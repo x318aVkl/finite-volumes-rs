@@ -1,11 +1,17 @@
 [package]
 name = "finite-volumes"
 version = "0.1.0"
+description = "Unstructured finite volume library for fluid flow simulation"
 edition = "2024"
+license = "GPL-3.0"
+keywords = ["physics", "fluid dynamics", "fluid", "finite volume", "fvm"]
+categories = ["aerospace::simulation", "science", "mathematics"]
+
 
 [dependencies]
 metis = "0.2"
 mpi = "0.8"
+clap = { version = "4.5", features = ["derive"] }
 
 
 [profile.dev.package."*"]
@@ -19,4 +25,16 @@ codegen-units = 256
 opt-level = 3
 debug = false
 lto = 'thin'
+
+
+[[example]]
+name = "ex1"
+path = "examples/ex1/ex1.rs"
+
+[[example]]
+name = "ex2"
+path = "examples/ex2/ex2.rs"
+
+[[bin]]
+name = "decompose"
 

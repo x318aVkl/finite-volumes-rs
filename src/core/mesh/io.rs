@@ -472,6 +472,37 @@ impl<const DIM: usize> Mesh<DIM> {
 
 
 
+
+/// Returns the dimension of a mesh file
+/// - Usefull for solvers to determine the problems dimension before calling a generic function
+pub fn get_mesh_dimension(filepath: &str) -> Result<usize, crate::error::Error> {
+    let file = std::fs::File::open(filepath)?;
+    let reader = std::io::BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line?;
+
+        if line.contains("NDIME=") {
+            let dim = match line.trim().split("=").nth(1).unwrap().trim().parse::<usize>() {Ok(v) => Ok(v), Err(_) => Err(crate::error::Error::ParseError(line.to_string()))}?;
+            return Ok(dim);
+        }
+    }
+
+    Err(crate::error::Error::MeshDimensionReadError)
+}
+
+
+
+pub fn check_file_extension(filepath: &str, ext: &str) -> bool {
+    let fpl = filepath.len();
+    if fpl < ext.len() {
+        return false;
+    }
+    &filepath[(fpl - ext.len())..fpl] == ext
+}
+
+
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -520,5 +551,7 @@ mod test {
     }
 
 }
+
+
 
 

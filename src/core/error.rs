@@ -6,11 +6,16 @@ pub enum Error {
     InvalidDimension(usize),
     WrongMeshFileDimension(usize),
     MeshReadError{line: usize},
+    MeshDimensionReadError,
+
+    ParseError(String),
 
     MetisError(metis::Error),
     MetisNewGraphError(metis::NewGraphError),
 
     MpiInitializeFailed,
+
+    StdIoError(std::io::Error),
 }
 
 impl std::fmt::Display for Error {
@@ -30,5 +35,10 @@ impl From<metis::Error> for Error {
 impl From<metis::NewGraphError> for Error {
     fn from(value: metis::NewGraphError) -> Self {
         Self::MetisNewGraphError(value)
+    }
+}
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Self::StdIoError(value)
     }
 }

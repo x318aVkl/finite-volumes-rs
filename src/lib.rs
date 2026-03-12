@@ -23,6 +23,31 @@ pub mod prelude {
     pub use super::Field;
     pub use super::core::evaluator::Evaluator;
 
+    pub use super::core::{
+        communicator::Communicator,
+        mesh::{
+            CellIndex,
+            FaceIndex,
+            FaceNeighbor,
+        }
+    };
+    pub use super::post::{
+        PvtuWriter,
+    };
+    pub use super::linalg::{
+        DistributedMatrix,
+        DistributedVector,
+        preconditioners::{
+            self,
+            IncompleteCholesky,
+            IncompleteLowerUpper,
+        },
+        solvers,
+    };
+
     pub use super::core::mesh::geometry;
+
+    pub use mpi::traits::Communicator as MpiCommunicatorTrait;
+    pub use mpi::topology::SimpleCommunicator as MpiCommunicator;
 
 }

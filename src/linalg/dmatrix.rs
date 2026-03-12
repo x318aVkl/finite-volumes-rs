@@ -1,7 +1,7 @@
 
 use std::ops::{Add, AddAssign, SubAssign};
 
-use crate::{core::{Sparsity, mesh::CellIndex}, fvm::traits::Elementwise, linalg::{AbsoluteValue, ApproximateCmp}};
+use crate::{core::{Sparsity, mesh::CellIndex}, linalg::ApproximateCmp};
 
 
 use super::dvector::DistributedVector;
@@ -281,45 +281,6 @@ impl<T> std::ops::IndexMut<[usize; 2]> for DistributedMatrix<T> {
         match self.get_mut(index[0], index[1]) {
             Some(v) => v,
             None => panic!("Sparse matrix index ({}, {}) not found", index[0], index[1])
-        }
-    }
-}
-
-
-
-
-
-
-impl<T> DistributedMatrix<T> {
-
-    pub fn enforce_system_diagonal_dominance<V>(&mut self, rhs: &mut DistributedVector<V>, sol: &DistributedVector<V>, alpha: f64) 
-    where T: Default + Copy + AbsoluteValue + AddAssign + Elementwise<Element = f64> + std::ops::Sub<T, Output=T> + std::ops::Mul<V, Output = V>,
-    V: AddAssign + Copy
-    {
-        for row in 0..self.nrows {
-            let mut sumi = T::default();
-            for (col, aij) in self.iter_row(row) {
-                if col != row {
-                    sumi += aij.absolute_value();
-                }
-            }
-
-            let di = self[[row, row]];
-
-            let new_di = di.elemwise_map_zip(sumi, |di, sumi| {
-                let si = if di > 1e-16 {
-                    1.0
-                } else if di < -1e-16 {
-                    -1.0
-                } else {
-                    panic!("diagonal.abs() is < 1e-16")
-                };
-                si * di.abs().max(sumi) / alpha
-            });
-            let delta_di = new_di - di;
-            self[[row, row]] = new_di;
-
-            rhs[row] += delta_di * sol[row];
         }
     }
 }
