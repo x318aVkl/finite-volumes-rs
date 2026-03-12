@@ -16,6 +16,7 @@ pub fn conjugate_gradient<'a, G: Geometry<DIM>, LHS, RHS, const DIM: usize>(
     preconditioner: &impl Preconditioner<RHS>,
     comm: &'a Communicator<G, DIM>,
     tolerance: f64,
+    relative_tolerance: f64,
     max_iter: usize,
 ) -> Result<LinearSolverInfo, Error> 
 where G::IndexType: From<usize>, crate::Mesh<DIM>: crate::core::mesh::MeshGet<'a, G::IndexType>,
@@ -81,7 +82,7 @@ where G::IndexType: From<usize>, crate::Mesh<DIM>: crate::core::mesh::MeshGet<'a
 
         let r_dot_r = comm.single().reduce_add(r.dot(&r));
         error = r_dot_r.sqrt() / bnorm;
-        if error < tolerance {
+        if (error < tolerance) || (error / initial_residual < relative_tolerance) {
             history.push(error);
             iter += 1;
             break;

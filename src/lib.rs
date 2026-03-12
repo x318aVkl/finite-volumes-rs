@@ -29,6 +29,8 @@ pub mod prelude {
             CellIndex,
             FaceIndex,
             FaceNeighbor,
+            FaceRef,
+            CellRef,
         }
     };
     pub use super::post::{
@@ -51,3 +53,4 @@ pub mod prelude {
     pub use mpi::topology::SimpleCommunicator as MpiCommunicator;
 
 }
+

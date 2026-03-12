@@ -5,13 +5,14 @@ use finite_volumes::prelude::*;
 
 
 
-pub fn assemble_momentum_equation<const DIM: usize>(
-    mesh: &Mesh<DIM>,
+pub fn assemble_momentum_equation<'a, const DIM: usize>(
+    mesh: &'a Mesh<DIM>,
     velocity: &Field<Vector<DIM>, geometry::Cell, DIM>,
     velocity_gradient: &Field<Matrix<DIM, DIM>, geometry::Cell, DIM>,
     phi: &Field<f64, geometry::Face, DIM>,
     viscosity: f64,
     dt: f64,
+    velocity_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>),
 ) -> Result<(DistributedMatrix<f64>, DistributedVector<Vector<DIM>>), finite_volumes::error::Error> {
     
 
@@ -80,20 +81,25 @@ pub fn assemble_momentum_equation<const DIM: usize>(
             },
             FaceNeighbor::Boundary(_) => {
 
-                let mut bv: Vector<DIM> = Vector::zero();
-                if (face.center().y() - 1.0).abs() < 1e-10 {
-                    bv[0] = 1.0;
-                }
+                let (blhs, bv) = velocity_bc(&face); 
+
+                // face value = blhs*cell_value + bv
+
+                // diffusion: t * (face_value - cell_value)
+                // t * (blhs*cell_Value + bv - cell_value)
+                // tt * ((blhs - 1.0) * cell_value + bv)
 
                 // diffusion
                 let delta = face.center() - celli.center();
                 let dx = delta.norm();
                 let t = - viscosity * 1.0 / dx * face.area();
-                lhs[[i, i]] -= t;
+                lhs[[i, i]] -= t * (1.0 - blhs);
                 rhs[i] -= bv * t;
 
                 // convection
-                // zero convective flux
+                let t = - phi * face.area();
+                lhs[[i, i]] -= t * blhs;
+                rhs[i] += t * bv;
             },
             FaceNeighbor::None => panic!("face neighbor is none"),
         }
@@ -104,10 +110,11 @@ pub fn assemble_momentum_equation<const DIM: usize>(
 
 
 
-pub fn compute_velocity_gradients<const DIM: usize>(
+pub fn compute_velocity_gradients<'a, const DIM: usize>(
     velocity_gradient: &mut Field<Matrix<DIM, DIM>, geometry::Cell, DIM>,
     velocity: &Field<Vector<DIM>, geometry::Cell, DIM>,
-    mesh: &Mesh<DIM>,
+    mesh: &'a Mesh<DIM>,
+    velocity_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>),
 ) {
     // compute and update gradients
     for cell in mesh.iter_cells() {
@@ -122,12 +129,9 @@ pub fn compute_velocity_gradients<const DIM: usize>(
                     grad += velocity[c].outer(g);
                 },
                 FaceNeighbor::Boundary(_) => {
-                    let mut bv: Vector<DIM> = Vector::zero();
-                    if (face.center().y() - 1.0).abs() < 1e-10 {
-                        bv[0] = 1.0;
-                    }
+                    let (blhs, bv) = velocity_bc(&face); 
                     
-                    grad += bv.outer(g);
+                    grad += (blhs * velocity[cell.id()] + bv).outer(g);
 
                 },
                 _ => panic!(""),

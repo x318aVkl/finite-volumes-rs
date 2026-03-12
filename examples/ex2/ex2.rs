@@ -8,13 +8,83 @@
 mod momentum;
 mod pressure;
 
+use std::collections::HashMap;
 
 use finite_volumes::prelude::*;
 
 
+enum ProblemType {
+    LidDriven,
+    Poiseuille,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum BoundaryCondition<const DIM: usize> {
+    Inlet{velocity: Vector<DIM>},
+    Wall,
+    MovingWall{wall_velocity: Vector<DIM>},
+    Outlet{pressure: f64},
+}
+
+struct BoundaryConditionSet<const DIM: usize> {
+    bcs: HashMap<u16, BoundaryCondition<DIM>>,
+}
+
+impl<const DIM: usize> BoundaryConditionSet<DIM> {
+    fn new() -> Self {
+        Self { bcs: HashMap::new() }
+    }
+    pub fn with(mut self, bid: u16, bc: BoundaryCondition<DIM>) -> Self {
+        self.bcs.insert(bid, bc);
+        self
+    }
+    fn get(&self, bid: u16) -> Option<&BoundaryCondition<DIM>> {
+        self.bcs.get(&bid)
+    }
+    fn velocity<'a>(&'a self)-> impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>) {
+        |face| {
+            let bid = face.boundary().unwrap();
+            match self.get(bid).unwrap() {
+                BoundaryCondition::Inlet { velocity } => {
+                    (0.0, *velocity)
+                },
+                BoundaryCondition::Outlet { pressure: _ } => {
+                    (1.0, Vector::zero())
+                },
+                BoundaryCondition::Wall => {
+                    (0.0, Vector::zero())
+                },
+                BoundaryCondition::MovingWall { wall_velocity } => {
+                    (0.0, *wall_velocity )
+                }
+            }
+        }
+    }
+    fn pressure<'a>(&'a self) -> impl Fn(&FaceRef<'a, DIM>) -> (f64, f64) {
+        |face| {
+            let bid = face.boundary().unwrap();
+            match self.get(bid).unwrap() {
+                BoundaryCondition::Inlet { velocity: _ } => {
+                    (1.0, 0.0)
+                },
+                BoundaryCondition::Outlet { pressure } => {
+                    (0.0, *pressure)
+                },
+                BoundaryCondition::Wall => {
+                    (1.0, 0.0)
+                },
+                BoundaryCondition::MovingWall { wall_velocity: _ } => {
+                    (1.0, 0.0)
+                }
+            }
+        }
+    }
+}
+
 
 
 fn ex2<const DIM: usize>(
+    problem: ProblemType,
     world: MpiCommunicator,
     viscosity: f64,
     dt: f64,
@@ -25,6 +95,26 @@ fn ex2<const DIM: usize>(
     let rank = world.rank() as usize;
 
     let mesh: Mesh<DIM> = Mesh::read(std::io::BufReader::new(std::fs::File::open(if world.size() == 1 {"examples/ex2/mesh.msh".to_string()} else {format!("examples/ex2/mesh_{}.msh", rank)}.as_str()).unwrap()), Some(world)).unwrap();
+
+    // setup the boundary conditions
+    let mut wall_velocity = Vector::zero();
+    wall_velocity[0] = 1.0;
+    let bcs = match problem {
+        ProblemType::LidDriven => {
+            BoundaryConditionSet::new()
+            .with(2, BoundaryCondition::MovingWall { wall_velocity })
+            .with(0, BoundaryCondition::Wall)
+            .with(1, BoundaryCondition::Wall)
+            .with(3, BoundaryCondition::Wall)
+        },
+        ProblemType::Poiseuille => {
+            BoundaryConditionSet::new()
+            .with(0, BoundaryCondition::Wall)
+            .with(1, BoundaryCondition::Outlet { pressure: 0.0 })
+            .with(2, BoundaryCondition::Wall)
+            .with(3, BoundaryCondition::Inlet { velocity: wall_velocity })
+        }
+    };
 
     // create fields
     let mut velocity = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
@@ -42,7 +132,7 @@ fn ex2<const DIM: usize>(
     let mut ainv_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
 
     // init the velocity gradient
-    momentum::compute_velocity_gradients(&mut velocity_gradient, &velocity, &mesh);
+    momentum::compute_velocity_gradients(&mut velocity_gradient, &velocity, &mesh, bcs.velocity());
 
     // create a communicator
     let comm = Communicator::<geometry::Cell, _>::from_mesh(&mesh);
@@ -60,7 +150,8 @@ fn ex2<const DIM: usize>(
             &velocity_gradient, 
             &phi, 
             viscosity, 
-            dt
+            dt,
+            bcs.velocity(),
         )?;
         
         let npcorr = 3;
@@ -82,6 +173,8 @@ fn ex2<const DIM: usize>(
                 &mut ainv_face, 
                 &hbya, 
                 &ainv, 
+                bcs.velocity(),
+                bcs.pressure(),
                 &mesh
             );
 
@@ -89,20 +182,22 @@ fn ex2<const DIM: usize>(
             let (plhs, prhs) = pressure::assemble_pressure_equation(
                 &hbyan_face, 
                 &ainv_face, 
+                bcs.pressure(),
                 &mesh
             )?;
 
             // solve the pressure equation
             {
                 let mut solution = DistributedVector::from_data(pressure.raw_data());
-                let precond = IncompleteCholesky::from_matrix(&plhs);
+                let precond = IncompleteCholesky::from_matrix(&plhs, 2);
                 let result = solvers::conjugate_gradient(
                     &mut solution, 
                     &plhs, 
                     &prhs, 
                     &precond, 
                     &comm, 
-                    if pcorr == (npcorr - 1) {1e-8} else {1e-4}, 
+                    1e-6, 
+                    if pcorr == (npcorr - 1) {1e-3} else {0.1},
                     1000,
                 ).unwrap();
                 pressure.set_from(solution.data());
@@ -113,15 +208,7 @@ fn ex2<const DIM: usize>(
             pressure::compute_pressure_gradients(
                 &mut pressure_gradient, 
                 &pressure, 
-                &mesh
-            );
-
-            // correct the face flux
-            pressure::correct_phi(
-                &mut phi, 
-                &hbyan_face, 
-                &ainv_face, 
-                &pressure, 
+                bcs.pressure(),
                 &mesh
             );
 
@@ -134,6 +221,23 @@ fn ex2<const DIM: usize>(
                 &mesh,
             );
         }
+
+        // finished, correct face flux and velocity gradients
+        pressure::correct_phi(
+            &mut phi, 
+            &hbyan_face, 
+            &ainv_face, 
+            &pressure, 
+            bcs.pressure(),
+            &mesh
+        );
+
+        momentum::compute_velocity_gradients(
+            &mut velocity_gradient, 
+            &velocity, 
+            &mesh, 
+            bcs.velocity()
+        );
 
         // compute the residual
         let mut residual = 0.0;
@@ -166,11 +270,23 @@ fn main() -> Result<(), finite_volumes::error::Error> {
     let universe = mpi::initialize().ok_or(finite_volumes::error::Error::MpiInitializeFailed)?;
     let world = universe.world();
 
+    let args: Vec<String> = std::env::args().collect();
+    let problem = if args.len() == 1 {
+        ProblemType::LidDriven
+    } else {
+        match args[1].as_str() {
+            "lid-driven" => ProblemType::LidDriven,
+            "poiseuille" => ProblemType::Poiseuille,
+            _ => panic!("Problem type {} invalid", args[1])
+        }
+    };
+
     ex2::<2>(
+        problem,
         world,
-        1.0 / 100.0,
-        0.1,
-        100,
+        1.0 / 2000.0,
+        0.025,
+        1000,
     )?;
 
     Ok(())

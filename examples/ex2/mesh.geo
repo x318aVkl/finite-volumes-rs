@@ -1,5 +1,5 @@
 
-s = 0.1;
+s = 0.01;
 
 Point(1) = {0, 0, 0, s};
 Point(2) = {1, 0, 0, s};
@@ -15,13 +15,16 @@ Curve Loop(1) = {1, 2, 3, 4};
 Plane Surface(1) = {1};
 
 
-Physical Curve(0) = {1, 2, 3, 4};
+Physical Curve(0) = {1};
+Physical Curve(1) = {2};
+Physical Curve(2) = {3};
+Physical Curve(3) = {4};
 Physical Surface(0) = {1};
 
 //Mesh.MeshSizeFromPoints = 1;
 
 
-Transfinite Curve{1, 2, 3, 4} = 41;
+Transfinite Curve{1, 2, 3, 4} = 129;
 Transfinite Surface{1};
 
 Recombine Surface{1};

@@ -44,12 +44,14 @@ pub fn compute_hbya_ainv<const DIM: usize>(
 
 
 
-pub fn intepolate_hbya_ainv_faces<const DIM: usize>(
+pub fn intepolate_hbya_ainv_faces<'a, const DIM: usize>(
     hbyan_face: &mut Field<f64, geometry::Face, DIM>,
     ainv_face: &mut Field<f64, geometry::Face, DIM>,
     hbya: &Field<Vector<DIM>, geometry::Cell, DIM>,
     ainv: &Field<f64, geometry::Cell, DIM>,
-    mesh: &Mesh<DIM>,
+    velocity_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>),
+    pressure_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, f64),
+    mesh: &'a Mesh<DIM>,
 ) {
     for face in mesh.iter_faces() {
         
@@ -61,10 +63,20 @@ pub fn intepolate_hbya_ainv_faces<const DIM: usize>(
                 ainv_face[face.id()] = (ainv[i] + ainv[j]) * 0.5;
             },
             FaceNeighbor::Boundary(_) => {
-                // zero since zero pressure gradient
-                hbyan_face[face.id()] = 0.0;
+                //get velocity and pressure bcs
+                let (blhsu, bvu) = velocity_bc(&face);
+                let (blhsp, bvp) = pressure_bc(&face);
 
-                // this one must not be zero
+                let p_wall = ((blhsp - 1.0).abs() < 1e-10) && (bvp.abs() < 1e-10);
+                let u_wall = (blhsu.abs() < 1e-10) && (bvu.dot(face.normal()).abs() < 1e-10);
+
+                if p_wall && u_wall {
+                    // zero since wall
+                    hbyan_face[face.id()] = 0.0;
+                } else {
+                    hbyan_face[face.id()] = hbya[i].dot(face.normal());
+                }
+
                 ainv_face[face.id()] = ainv[i];
             },
             _ => {panic!()}
@@ -79,10 +91,11 @@ pub fn intepolate_hbya_ainv_faces<const DIM: usize>(
 
 
 
-pub fn assemble_pressure_equation<const DIM: usize>(
+pub fn assemble_pressure_equation<'a, const DIM: usize>(
     hbyan_face: &Field<f64, geometry::Face, DIM>,
     ainv_face: &Field<f64, geometry::Face, DIM>,
-    mesh: &Mesh<DIM>,
+    pressure_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, f64),
+    mesh: &'a Mesh<DIM>,
 ) -> Result<(DistributedMatrix<f64>, DistributedVector<f64>), finite_volumes::error::Error> {
     
 
@@ -127,10 +140,19 @@ pub fn assemble_pressure_equation<const DIM: usize>(
             },
             FaceNeighbor::Boundary(_) => {
 
-               // zero gradient condition
+               // boundary condition
+                let (blhs, bv) = pressure_bc(&face);
 
-               // still add the divergence of hbya term
-               // but in this case, its zero
+                // diffusion
+                let delta = face.center() - celli.center();
+                let dx = delta.norm();
+                let t = - ainv * 1.0 / dx * face.area();
+
+                lhs[[i, i]] -= t * (1.0 - blhs);
+                rhs[i] -= t * bv;
+
+                // also add the hbyan term
+                rhs[i] -= hbyan * face.area();
 
             },
             FaceNeighbor::None => panic!("face neighbor is none"),
@@ -143,12 +165,13 @@ pub fn assemble_pressure_equation<const DIM: usize>(
 
 
 
-pub fn correct_phi<const DIM: usize>(
+pub fn correct_phi<'a, const DIM: usize>(
     phi: &mut Field<f64, geometry::Face, DIM>,
     hbyan_face: &Field<f64, geometry::Face, DIM>,
     ainv_face: &Field<f64, geometry::Face, DIM>,
     pressure: &Field<f64, geometry::Cell, DIM>,
-    mesh: &Mesh<DIM>,
+    pressure_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, f64),
+    mesh: &'a Mesh<DIM>,
 ) {
     for face in mesh.iter_faces() {
         let i = face.owner();
@@ -170,7 +193,16 @@ pub fn correct_phi<const DIM: usize>(
                 phi[face.id()] = hbyan - ainv * pgrad_n;
             },
             FaceNeighbor::Boundary(_) => {
-                phi[face.id()] = 0.0;
+                let (blhsp, bvp) = pressure_bc(&face);
+
+                let p_face = blhsp * pressure[i] + bvp;
+
+                let delta = face.center() - celli.center();
+                let dx = delta.norm();
+
+                let pgrad_n = (p_face - pressure[i]) / dx;
+
+                phi[face.id()] = hbyan - ainv * pgrad_n;
             },
             _ => panic!(),
         }
@@ -205,10 +237,11 @@ pub fn correct_velocity<const DIM: usize>(
 
 
 
-pub fn compute_pressure_gradients<const DIM: usize>(
+pub fn compute_pressure_gradients<'a, const DIM: usize>(
     pressure_gradient: &mut Field<Vector<DIM>, geometry::Cell, DIM>,
     pressure: &Field<f64, geometry::Cell, DIM>,
-    mesh: &Mesh<DIM>,
+    pressure_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, f64),
+    mesh: &'a Mesh<DIM>,
 ) {
     // compute and update gradients
     for cell in mesh.iter_cells() {
@@ -223,7 +256,11 @@ pub fn compute_pressure_gradients<const DIM: usize>(
                     grad += pressure[c] * g;
                 },
                 FaceNeighbor::Boundary(_) => {
-                    grad += pressure[cell.id()] * g;
+                    let (blhsp, bvp) = pressure_bc(&face);
+
+                    let p_face = blhsp * pressure[cell.id()] + bvp;
+
+                    grad += p_face * g;
 
                 },
                 _ => panic!(""),
