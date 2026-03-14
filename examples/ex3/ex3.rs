@@ -48,6 +48,12 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
     let comm = Communicator::<geometry::Cell, _>::from_mesh(&mesh);
 
 
+    // setup the schemes dynamically
+
+    let schemes = DynamicSchemeSet::default()
+        .with(SchemeType::FaceInterpolation, "limited-linear");
+
+
     fn boundary_condition() -> impl Fn(&FaceRef<'_, 2>) -> (Matrix<4, 4>, Vector<4>) {
         |face| {
         if face.center().y().abs() < 1e-10 {
@@ -85,15 +91,15 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
                 rhs
             ) = assemble::<_, _, _, _>(
                     terms::time(
-                        schemes::time::Euler::new(&u_old, dt)
+                        schemes.time(dt, Some(&u_old))
                     )
                     -  terms::linear_source(&coupled_source)
                     + terms::convection(
-                    schemes::faceinterp::LimitedLinear::new(&phi, &u_lim),
+                        schemes.faceinterp(Some(&phi), Some(&u_lim)),
                     &phi,
                     )
                     - terms::laplacian(
-                    schemes::facengrad::Orthogonal::new(),
+                    schemes.facengrad(Some(&u_grad)),
                     &mu,
                     )
                 ,

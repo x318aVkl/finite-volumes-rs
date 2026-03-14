@@ -50,6 +50,10 @@ pub mod prelude {
 
     pub use super::fvm::{
         terms::Term,
+        schemes::dynamic::{
+            DynamicSchemeSet,
+            SchemeType,
+        },
     };
 
     pub use super::core::mesh::geometry;

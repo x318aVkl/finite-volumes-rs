@@ -1,6 +1,6 @@
 use std::{marker::PhantomData, ops::{Add, Mul, Neg}};
 
-use crate::{Mesh, Vector, prelude::{FaceNeighbor, FaceRef, Unit}};
+use crate::{Field, Mesh, Vector, prelude::{FaceNeighbor, FaceRef, Unit, geometry}};
 
 
 use super::FaceNormalGradientScheme;
@@ -8,11 +8,23 @@ use super::FaceNormalGradientScheme;
 
 
 pub struct Corrected<'a, V, G, Lhs, const DIM: usize> {
-    gradients: &'a [G],
+    gradients: &'a Field<G, geometry::Cell, DIM>,
     /// coefficient that multiplies the non-orthogonal correction, 0: no correction, 1: full correction
     corrector_reduction: f64,
     phv: PhantomData<V>,
     pdl: PhantomData<Lhs>,
+}
+
+
+impl<'a, V, G, Lhs, const DIM: usize> Corrected<'a, V, G, Lhs, DIM> {
+    pub fn new(gradients: &'a Field<G, geometry::Cell, DIM>, corrector_reduction: f64) -> Self {
+        Self {
+            gradients,
+            corrector_reduction,
+            phv: PhantomData,
+            pdl: PhantomData
+        }
+    }
 }
 
 
@@ -32,8 +44,8 @@ impl<'b, G, V, Lhs, const DIM: usize> FaceNormalGradientScheme<DIM> for Correcte
                 let n = face.normal();
                 let c_corr = 1.0 / n.dot(d);
 
-                let g0 = self.gradients[usize::from(i)];
-                let g1 = self.gradients[usize::from(j)];
+                let g0 = self.gradients[i];
+                let g1 = self.gradients[j];
             
                 let gf = (g0 + g1) * 0.5;
 
@@ -46,7 +58,7 @@ impl<'b, G, V, Lhs, const DIM: usize> FaceNormalGradientScheme<DIM> for Correcte
                 let n = face.normal();
                 let c_corr = 1.0 / n.dot(d);
 
-                let explicit = self.gradients[usize::from(i)] * (n - c_corr * d);
+                let explicit = self.gradients[i] * (n - c_corr * d);
 
                 (Lhs::unit() * ( -c_corr ), Lhs::unit() * c_corr,  - explicit * self.corrector_reduction )
             },

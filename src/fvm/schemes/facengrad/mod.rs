@@ -20,3 +20,14 @@ pub trait FaceNormalGradientScheme<const DIM: usize> {
 
     fn terms<'a>(&self, face: &'a FaceRef<'a, DIM>, mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs);
 }
+
+
+impl<'b, Lhs, Rhs, const DIM: usize> FaceNormalGradientScheme<DIM> for Box<dyn FaceNormalGradientScheme<DIM, Lhs = Lhs, Rhs = Rhs> + 'b> {
+    type Lhs = Lhs;
+    type Rhs = Rhs;
+
+    fn terms<'a>(&self, face: &'a FaceRef<'a, DIM>, mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
+        self.as_ref().terms(face, mesh)
+    }
+}
+

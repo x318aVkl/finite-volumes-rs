@@ -28,7 +28,7 @@ impl<'b, V, Lhs, const DIM: usize> Term<DIM> for Time<'b, V, Lhs, DIM> where Lhs
     type Lhs = Lhs;
     type Rhs = V;
 
-    fn cell_terms<'a>(&self, cell: &'a crate::prelude::CellRef<'a, DIM>, mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Rhs) {
+    fn cell_terms<'a>(&'a self, cell: &'a crate::prelude::CellRef<'a, DIM>, mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Rhs) {
         let (l, r) = self.scheme.terms(cell, mesh);
         (l, r)
     }

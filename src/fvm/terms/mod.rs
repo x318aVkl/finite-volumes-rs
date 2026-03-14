@@ -23,11 +23,11 @@ pub trait Term<const DIM: usize>: Sized {
     type Lhs: Zero;
     type Rhs: Zero;
 
-    fn cell_terms<'a>(&self, _cell: &'a CellRef<'a, DIM>, _mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Rhs) {
+    fn cell_terms<'a>(&'a self, _cell: &'a CellRef<'a, DIM>, _mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Rhs) {
         (Self::Lhs::zero(), Self::Rhs::zero())
     }
 
-    fn face_terms<'a>(&self, _face: &'a FaceRef<'a, DIM>, _mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
+    fn face_terms<'a>(&'a self, _face: &'a FaceRef<'a, DIM>, _mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
         (Self::Lhs::zero(), Self::Lhs::zero(), Self::Rhs::zero())
     }
 

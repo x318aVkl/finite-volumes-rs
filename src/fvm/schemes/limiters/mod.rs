@@ -5,7 +5,11 @@ pub trait LimiterScheme {
 }
 
 
-
+impl<'b> LimiterScheme for Box<dyn LimiterScheme + 'b> {
+    fn get_limiter(&self, r: f64) -> f64 {
+        self.as_ref().get_limiter(r)
+    }
+}
 
 
 pub struct LimitedLinear(pub f64);

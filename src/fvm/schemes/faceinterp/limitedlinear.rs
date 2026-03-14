@@ -27,7 +27,7 @@ impl<'b, Lhs, const DIM: usize, V> FaceInterpolationScheme<DIM> for LimitedLinea
     type Lhs = Lhs;
     type Rhs = V;
 
-    fn terms<'a>(&self, face: &'a crate::prelude::FaceRef<'a, DIM>, _mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
+    fn terms<'a>(&self, face: &'a crate::prelude::FaceRef<'a, DIM>, mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
         
         let flux = self.flux[face.id()];
 
@@ -38,8 +38,24 @@ impl<'b, Lhs, const DIM: usize, V> FaceInterpolationScheme<DIM> for LimitedLinea
 
         let lim = self.limiters[face.id()];
 
-        t[u] = 0.5 * lim + (1.0 - lim);
-        t[d] = 0.5 * lim;
+        let fc = face.center();
+
+        let cc = mesh.cell(face.owner()).center();
+
+        let nc = match face.neighbor() {
+            FaceNeighbor::Cell(c) => {
+                mesh.cell(c).center()
+            },
+            FaceNeighbor::Boundary(_) => {
+                face.center()
+            }
+        };
+        let w = face.normal().dot(nc - fc) / (face.normal().dot(nc - cc)).max(1e-14);
+
+        let wu = if u == 0 {w} else {1.0 - w};
+
+        t[u] = wu * lim + (1.0 - lim);
+        t[d] = (1.0 - wu) * lim;
 
         match face.neighbor() {
             FaceNeighbor::Cell(_) => {
