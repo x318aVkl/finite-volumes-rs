@@ -2,6 +2,7 @@ use mpi::traits::Communicator;
 
 use crate::core::field::Field;
 use crate::core::mesh::{CellIndex, NodeIndex, geometry};
+use crate::prelude::FloatBuffered;
 use crate::{Mesh, Vector};
 
 use std::collections::{HashMap, HashSet};
@@ -27,23 +28,26 @@ pub trait PvtuGetCellWise {
 }
 
 pub struct PvtuWriter<'a, const DIM: usize> {
-    scalar_data: Vec<(String, Box<dyn PvtuGetCellWise<Output = f64> + 'a>)>,
-    vector_data: Vec<(String, Box<dyn PvtuGetCellWise<Output = Vector<DIM>> + 'a>)>,
+    data: Vec<(String, usize, Vec<f64>)>,
     mesh: &'a Mesh<DIM>,
 }
 
 impl<'a, const DIM: usize> PvtuWriter<'a, DIM> {
     pub fn new(mesh: &'a Mesh<DIM>) -> Self {
-        PvtuWriter { scalar_data: vec![], vector_data: vec![], mesh }
+        PvtuWriter { data: vec![], mesh }
     }
 
-    pub fn with_scalar(mut self, name: &str, data: impl PvtuGetCellWise<Output = f64> + 'a) -> Self {
-        self.scalar_data.push((name.to_string(), Box::new(data)));
-        self
-    }
+    pub fn with<T>(mut self, name: &str, data: impl PvtuGetCellWise<Output = T> + 'a) -> Self
+    where T: FloatBuffered
+     {
 
-    pub fn with_vector(mut self, name: &str, data: impl PvtuGetCellWise<Output = Vector<DIM>> + 'a) -> Self {
-        self.vector_data.push((name.to_string(), Box::new(data)));
+        let ncomps = T::f64_buffer_size();
+        let mut fdata = vec![0.0; self.mesh.n_cells() * ncomps];
+        for i in 0..self.mesh.n_cells() {
+            let vi = data.get_cell_value(CellIndex::from(i));
+            vi.put_in_f64_buffer( &mut fdata[(i*ncomps)..((i+1)*ncomps)] );
+        }
+        self.data.push((name.to_string(), ncomps, fdata));
         self
     }
 
@@ -73,15 +77,16 @@ impl<'a, const DIM: usize> PvtuWriter<'a, DIM> {
 
         writer.write("  <PUnstructuredGrid GhostLevel=\"0\">\n".as_bytes())?;
 
-        if (self.scalar_data.len() > 0) || (self.vector_data.len() > 0) {
+        if self.data.len() > 0 {
             writer.write("    <PCellData>\n".as_bytes())?;
 
-            for i in 0..self.scalar_data.len() {
-                write!(writer, "      <PDataArray Name=\"{}\" type=\"Float32\"/>\n", self.scalar_data[i].0)?;
-            }
-
-            for i in 0..self.vector_data.len() {
-                write!(writer, "      <PDataArray Name=\"{}\" type=\"Float32\" NumberOfComponents=\"3\"/>\n", self.vector_data[i].0)?;
+            for i in 0..self.data.len() {
+                let sizei = self.data[i].1;
+                if sizei == 1 {
+                    write!(writer, "      <PDataArray Name=\"{}\" type=\"Float32\"/>\n", self.data[i].0)?;
+                } else {
+                    write!(writer, "      <PDataArray Name=\"{}\" type=\"Float32\" NumberOfComponents=\"{}\"/>\n", self.data[i].0, self.data[i].1)?;
+                }
             }
 
             writer.write("    </PCellData>\n".as_bytes())?;
@@ -350,31 +355,17 @@ impl<'a, const DIM: usize> PvtuWriter<'a, DIM> {
         writer.write("      </Cells>\n".as_bytes())?;
 
 
-        if (self.scalar_data.len() > 0) || (self.vector_data.len() > 0) {
+        if self.data.len() > 0 {
             writer.write("    <CellData>\n".as_bytes())?;
 
-            for i in 0..self.scalar_data.len() {
-                write!(writer, "      <DataArray Name=\"{}\" type=\"Float32\">\n", self.scalar_data[i].0)?;
-
-                for c in 0..mesh_data.n_cells() {
-                    write!(writer, "{} ", self.scalar_data[i].1.get_cell_value(CellIndex::from(c)))?;
+            for i in 0..self.data.len() {
+                if self.data[i].1 == 1 {
+                    write!(writer, "      <DataArray Name=\"{}\" type=\"Float32\">\n", self.data[i].0)?;
+                } else {
+                    write!(writer, "      <DataArray Name=\"{}\" type=\"Float32\" NumberOfComponents=\"{}\">\n", self.data[i].0, self.data[i].1)?;
                 }
-                writer.write("\n".as_bytes())?;
-
-                write!(writer, "      </DataArray>\n")?;
-            }
-
-            for i in 0..self.vector_data.len() {
-                write!(writer, "      <DataArray Name=\"{}\" type=\"Float32\" NumberOfComponents=\"3\">\n", self.vector_data[i].0)?;
-
-                for c in 0..mesh_data.n_cells() {
-                    let vi = self.vector_data[i].1.get_cell_value(CellIndex::from(c));
-                    for j in 0..vi.len() {
-                        write!(writer, "{} ", vi[j])?;
-                    }
-                    for _j in vi.len()..3 {
-                        write!(writer, "0 ")?;
-                    }
+                for c in 0..self.data[i].2.len() {
+                    write!(writer, "{} ", self.data[i].2[c])?;
                 }
                 writer.write("\n".as_bytes())?;
 

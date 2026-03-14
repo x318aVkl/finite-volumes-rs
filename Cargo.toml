@@ -35,6 +35,11 @@ path = "examples/ex1/ex1.rs"
 name = "ex2"
 path = "examples/ex2/ex2.rs"
 
+[[example]]
+name = "ex3"
+path = "examples/ex3/ex3.rs"
+
+
 [[bin]]
 name = "decompose"
 

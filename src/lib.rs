@@ -31,7 +31,8 @@ pub mod prelude {
             FaceNeighbor,
             FaceRef,
             CellRef,
-        }
+        },
+        traits::*,
     };
     pub use super::post::{
         PvtuWriter,
@@ -45,6 +46,10 @@ pub mod prelude {
             IncompleteLowerUpper,
         },
         solvers,
+    };
+
+    pub use super::fvm::{
+        terms::Term,
     };
 
     pub use super::core::mesh::geometry;

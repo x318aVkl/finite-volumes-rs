@@ -17,6 +17,9 @@ pub(crate) use communicator::Communicator;
 
 pub mod traits {
 
+    use super::Matrix;
+    use super::Vector;
+
 
     pub trait FloatBuffered {
         fn f64_buffer_size() -> usize;
@@ -35,6 +38,54 @@ pub mod traits {
         fn build_from_f64_buffer(buffer: &[f64]) -> Self {
             assert!(buffer.len() > 0);
             buffer[0]
+        }
+    }
+
+
+    pub trait Unit {
+        fn unit() -> Self;
+    }
+
+    pub trait Zero {
+        fn zero() -> Self;
+    }
+
+
+
+    impl Unit for f64 {
+        fn unit() -> Self {
+            1.0
+        }
+    }
+
+    impl<const N: usize> Unit for Vector<N> {
+        fn unit() -> Self {
+            Self::one()
+        }
+    }
+
+    impl<const M: usize, const N: usize> Unit for Matrix<M, N> {
+        fn unit() -> Self {
+            Self::eye()
+        }
+    }
+
+
+    impl Zero for f64 {
+        fn zero() -> Self {
+            0.0
+        }
+    }
+
+    impl<const N: usize> Zero for Vector<N> {
+        fn zero() -> Self {
+            [0.0; N].into()
+        }
+    }
+
+    impl<const M: usize, const N: usize> Zero for Matrix<M, N> {
+        fn zero() -> Self {
+            Self::from_f64(0.0)
         }
     }
 

@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::core::{Matrix, Mesh, Vector, error::Error, mesh::{CellData, CellIndex, FaceData, FaceIndex, FaceNeighbor, NodeIndex}, vector::Normal};
+use crate::core::{Matrix, Mesh, Vector, error::Error, mesh::{CellData, CellIndex, FaceData, FaceIndex, InternalFaceNeighbor, NodeIndex}, vector::Normal};
 
 
 
@@ -21,7 +21,7 @@ impl<const DIM: usize> Mesh<DIM> {
         for fi in 0..self.n_total_faces() {
             let n = self.face_data[fi].neighbor;
             match n {
-                FaceNeighbor::None => {
+                InternalFaceNeighbor::None => {
                     // check that the owner cell is not owned
                     let owner_cell = usize::from(self.face_data[fi].owner_cell);
                     assert!(!self.cell_data[owner_cell].ownership.owned());
@@ -70,7 +70,7 @@ impl<const DIM: usize> Mesh<DIM> {
                 let owner = usize::from(owner);
 
                 let inside_point = match self.face_data[f].neighbor {
-                    FaceNeighbor::Cell(n) => {
+                    InternalFaceNeighbor::Cell(n) => {
                         let neighbor = usize::from(n);
                         if self.cell_data[owner].ownership.owned() && self.cell_data[neighbor].ownership.owned() {
                             // no need to flip this face
@@ -84,7 +84,7 @@ impl<const DIM: usize> Mesh<DIM> {
                             //if !self.cell_data[owner].ownership.owned() {
                                 // also flip the owner and neighbor
                                 self.face_data[f].owner_cell = CellIndex::from(neighbor);
-                                self.face_data[f].neighbor = FaceNeighbor::Cell(CellIndex::from(owner));
+                                self.face_data[f].neighbor = InternalFaceNeighbor::Cell(CellIndex::from(owner));
                             }
                         }
                         self.cell_data[usize::from(self.face_data[f].owner_cell)].center

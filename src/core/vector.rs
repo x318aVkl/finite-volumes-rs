@@ -1,6 +1,6 @@
 use mpi::traits::Equivalence;
 
-use crate::core::traits::FloatBuffered;
+use crate::{core::traits::FloatBuffered, core::traits::Zero};
 
 
 
@@ -21,13 +21,7 @@ impl<const N: usize> std::fmt::Debug for Vector<N> {
 impl<const N: usize> Vector<N> {
 
     pub fn new() -> Vector<N> {
-        Self::zero()
-    }
-
-    pub fn zero() -> Vector<N> {
-        Vector {
-            data: [0.0; N]
-        }
+        Self {data: [0.0; N]}
     }
 
     pub fn one() -> Vector<N> {

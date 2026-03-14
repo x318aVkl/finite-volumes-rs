@@ -28,6 +28,16 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
         out
     }
 
+    pub fn from_f64(x: f64) -> Self {
+        let mut out = Matrix::new();
+
+        for i in 0..M.min(N) {
+            out[[i, i]] = x;
+        }
+
+        out
+    }
+
     pub fn diag<const D: usize>(d: Vector<D>) -> Matrix<D, D> {
         let mut out = Matrix::new();
 
@@ -75,6 +85,16 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
                 out[[j, i]] = self[[i, j]];
             }
         }        
+        out
+    }
+
+    pub fn sumsq(self) -> f64 {
+        let mut out = 0.0;
+        for i in 0..M {
+            for j in 0..N {
+                out += self[[i, j]].powi(2);
+            }
+        }
         out
     }
 
@@ -550,5 +570,14 @@ impl<const M: usize, const N: usize> FloatBuffered for Matrix<M, N> {
             }
         }
         out
+    }
+}
+impl<const M: usize, const N: usize> Into<Matrix<M, N>> for [[f64; N]; M] {
+    fn into(self) -> Matrix<M, N> {
+        let mut rows = [Vector::new(); M];
+        for i in 0..M {
+            rows[i] = self[i].into();
+        }
+        Matrix { rows }
     }
 }

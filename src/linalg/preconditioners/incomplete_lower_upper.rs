@@ -254,7 +254,9 @@ impl<T> IncompleteLowerUpper<T> {
             }
 
             // sparsify row
-            lu_row.sparsify(lu_row[i].magnitude() * 1e-6);
+            let mut retain = HashSet::new();
+            retain.insert(i);
+            lu_row.sparsify(lu_row[i].magnitude() * 1e-6, retain);
 
             self.lu.push_row(lu_row);
         }

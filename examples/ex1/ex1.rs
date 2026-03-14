@@ -105,9 +105,6 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
                         lhs[[i, i]] -= t;
                     }
                 },
-                FaceNeighbor::None => {
-                    panic!("Face neighbor is none")
-                }
             }
         }
 
@@ -163,7 +160,6 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
                             grad += field[cell.id()] * g;
                         }
                     },
-                    _ => panic!(""),
                 }
             }
 
@@ -175,7 +171,7 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
 
     // write the solution
     PvtuWriter::new(&mesh)
-        .with_scalar("phi", &field)
+        .with("phi", &field)
         .write("examples/ex1/solution.pvtu")
         .unwrap();
 

@@ -101,7 +101,6 @@ pub fn assemble_momentum_equation<'a, const DIM: usize>(
                 lhs[[i, i]] -= t * blhs;
                 rhs[i] += t * bv;
             },
-            FaceNeighbor::None => panic!("face neighbor is none"),
         }
     }
 
@@ -134,7 +133,6 @@ pub fn compute_velocity_gradients<'a, const DIM: usize>(
                     grad += (blhs * velocity[cell.id()] + bv).outer(g);
 
                 },
-                _ => panic!(""),
             }
         }
 

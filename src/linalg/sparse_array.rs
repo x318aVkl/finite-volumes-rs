@@ -1,5 +1,5 @@
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::linalg::Magnitude;
 
@@ -42,8 +42,8 @@ impl<T> SparseArray<T> {
 }
 
 impl<T> SparseArray<T> where T: Magnitude<Output = f64> + Copy {
-    pub fn sparsify(&mut self, tol: f64) {
-        self.data.retain(|_, v| v.magnitude() > tol);
+    pub fn sparsify(&mut self, tol: f64, retain: HashSet<usize>) {
+        self.data.retain(|i, v| if retain.contains(i) {true} else {v.magnitude() > tol});
     }
 }
 

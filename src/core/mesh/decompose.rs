@@ -2,7 +2,7 @@
 
 use std::collections::HashSet;
 
-use crate::{Mesh, core::mesh::{CellIndex, FaceIndex, FaceNeighbor, NodeIndex, Ownership}};
+use crate::{Mesh, core::mesh::{CellIndex, FaceIndex, InternalFaceNeighbor, NodeIndex, Ownership}};
 
 
 
@@ -56,7 +56,7 @@ impl<const DIM: usize> Mesh<DIM> {
             let ownerpart = parts[usize::from(ocell)];
             
             let fpart = match face.data.neighbor {
-                FaceNeighbor::Cell(c1) => {
+                InternalFaceNeighbor::Cell(c1) => {
                     let neighborpart = parts[usize::from(c1)];
                     if partnfaces[ownerpart as usize] <= partnfaces[neighborpart as usize] {
                         ownerpart

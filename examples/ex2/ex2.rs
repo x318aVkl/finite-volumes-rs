@@ -131,6 +131,7 @@ fn ex2<const DIM: usize>(
     let mut hbyan_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
     let mut ainv_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
 
+
     // init the velocity gradient
     momentum::compute_velocity_gradients(&mut velocity_gradient, &velocity, &mesh, bcs.velocity());
 
@@ -238,6 +239,7 @@ fn ex2<const DIM: usize>(
             &mesh, 
             bcs.velocity()
         );
+        
 
         // compute the residual
         let mut residual = 0.0;
@@ -247,15 +249,16 @@ fn ex2<const DIM: usize>(
         residual = (comm.single().reduce_add(residual) / comm.single().reduce_add(mesh.n_cells() as f64)).sqrt(); // / dt;
         if rank == 0 {println!("  residual = {:.3e}", residual)}
 
+        if rank == 0 {println!();}
+
         if residual < 1e-5 {break}
 
     }
 
-
     // done! write solution
     PvtuWriter::new(&mesh)
-        .with_scalar("p", &pressure)
-        .with_vector("U", &velocity)
+        .with("p", &pressure)
+        .with("U", &velocity)
         .write("examples/ex2/solution.pvtu")
         .unwrap();
 

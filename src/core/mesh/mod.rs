@@ -109,9 +109,13 @@ impl std::fmt::Display for CellIndex {
 pub enum FaceNeighbor {
     Boundary(u16),
     Cell(CellIndex),
+}
+#[derive(Clone, Copy, Debug)]
+enum InternalFaceNeighbor {
+    Boundary(u16),
+    Cell(CellIndex),
     None,
 }
-
 
 #[derive(Clone, Copy, Debug)]
 pub struct CellData<const DIM: usize> {
@@ -127,7 +131,7 @@ pub struct FaceData<const DIM: usize> {
     center: Vector<DIM>,
     normal: Vector<DIM>,
     owner_cell: CellIndex,
-    neighbor: FaceNeighbor,
+    neighbor: InternalFaceNeighbor,
     ownership: Ownership,
     global_id: u32,
 }
@@ -262,9 +266,9 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
     }
     pub fn other_cell(&self, cell: CellIndex) -> Option<CellIndex> {
         match self.data.neighbor {
-            FaceNeighbor::Boundary(_) => None,
-            FaceNeighbor::None => None,
-            FaceNeighbor::Cell(c1) => {
+            InternalFaceNeighbor::Boundary(_) => None,
+            InternalFaceNeighbor::None => None,
+            InternalFaceNeighbor::Cell(c1) => {
                 if cell == c1 {
                     Some(self.data.owner_cell)
                 } else {
@@ -276,7 +280,7 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
     pub fn fully_remote(&self) -> bool {
         let owner_remote = !self.mesh.cell(self.data.owner_cell).owned();
         match self.data.neighbor {
-            FaceNeighbor::Cell(c) => {
+            InternalFaceNeighbor::Cell(c) => {
                 let neighbor_remote = !self.mesh.cell(c).owned();
                 owner_remote & neighbor_remote
             },
@@ -289,7 +293,11 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
         self.data.owner_cell
     }
     pub fn neighbor(&self) -> FaceNeighbor {
-        self.data.neighbor
+        match self.data.neighbor {
+            InternalFaceNeighbor::Cell(c) => FaceNeighbor::Cell(c),
+            InternalFaceNeighbor::Boundary(b) => FaceNeighbor::Boundary(b),
+            InternalFaceNeighbor::None => panic!("face neighbor is none for face {}", self.id)
+        }
     }
 }
 
@@ -388,7 +396,7 @@ impl<const DIM: usize> Mesh<DIM> {
             center: Vector::new(), 
             normal: Vector::new(), 
             owner_cell: CellIndex(usize::MAX),
-            neighbor: match boundary {Some(i) => FaceNeighbor::Boundary(i), None => FaceNeighbor::None},
+            neighbor: match boundary {Some(i) => InternalFaceNeighbor::Boundary(i), None => InternalFaceNeighbor::None},
             ownership, 
             global_id: match global_id {
                 Some(v) => v,
@@ -429,8 +437,8 @@ impl<const DIM: usize> Mesh<DIM> {
                 self.face_data[fi].owner_cell = CellIndex(self.cell_data.len() - 1);
             } else {
                 match self.face_data[fi].neighbor {
-                    FaceNeighbor::None => {
-                        self.face_data[fi].neighbor = FaceNeighbor::Cell(CellIndex(self.cell_data.len() - 1));
+                    InternalFaceNeighbor::None => {
+                        self.face_data[fi].neighbor = InternalFaceNeighbor::Cell(CellIndex(self.cell_data.len() - 1));
                     },
                     _ => {
                         panic!("Error, trying to add another cell to a face with neighbor: {:?}", self.face_data[fi].neighbor);
