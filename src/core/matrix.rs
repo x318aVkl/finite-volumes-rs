@@ -535,6 +535,123 @@ impl<const M: usize, const N: usize> Matrix<M, N> {
 }
 
 
+
+
+
+
+// dynamic square matrices decompositions and operations
+impl DynamicMatrix {
+
+
+    pub fn swap_rows(&mut self, i: usize, j: usize) {
+        for k in 0..self.ncols() {
+            let tmp = self[[i, k]];
+            self[[i, k]] = self[[j, k]];
+            self[[j, k]] = tmp;
+        }
+    }
+
+    pub fn inv(&mut self, out: &mut DynamicMatrix) -> Result<(), Error> {
+
+        let size = self.ncols();
+        assert!(self.ncols() == self.nrows());
+
+        // compute the inverse of the matrix
+        
+        for i in 0..size {
+            for j in 0..size {
+                if i == j {
+                    out[[i, i]] = 1.0;
+                } else {
+                    out[[i, j]] = 0.0;
+                }
+            }
+        }
+
+        let mut p = vec![0; size];
+        for i in 0..size {
+            p[i] = i;
+        }
+
+        for k in 0..(size-1) {
+            let piv = self[[k, k]];
+
+            if piv.abs() < 1e-14 {
+                // swap with largest
+                let mut maxi = k;
+                let mut maxp = piv.abs();
+                for j in (k+1)..size {
+                    let pj = self[[k, j]].abs();
+                    if pj > maxp {
+                        maxi = j;
+                        maxp = pj;
+                    }
+                }
+                if maxi == k {
+                    return Err(Error::SingularMatrix);
+                }
+                // swap rows
+                self.swap_rows(k, maxi);
+                out.swap_rows(k, maxi);
+                p.swap(k, maxi);
+            }
+            let piv = self[[k, k]];
+
+            for i in (k+1)..size {
+                let f = - self[[i, k]] / piv;
+                
+                for j in 0..size {
+                    self[[i, j]] += self[[k, j]] * f;
+                    out[[i, j]] += out[[k, j]] * f;
+                }
+            }
+        }
+
+        for k in 0..size {
+            let piv = self[[k, k]];
+            if piv.abs() < 1e-14 {
+                return Err(Error::SingularMatrix);
+            }
+            for j in 0..size {
+                self[[k, j]] /= piv;
+                out[[k, j]] /= piv;
+            }
+        }
+
+        for k in (1..size).rev() {
+            let piv = self[[k, k]];
+
+            for i in 0..k {
+                let f = - self[[i, k]] / piv;
+                for j in 0..size {
+                    self[[i, j]] += self[[k, j]] * f;
+                    out[[i, j]] += out[[k, j]] * f;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+
+    pub fn imul(&self, out: &mut [f64], rhs: &[f64]) {
+        assert!(out.len() == self.nrows());
+        assert!(rhs.len() == self.ncols());
+
+        for i in 0..self.nrows() {
+            out[i] = 0.0;
+            for j in 0..self.ncols() {
+                out[i] += self[[i, j]] * rhs[j];
+            }
+        }
+    }
+
+}
+
+
+
+
+
 impl<const M: usize, const N: usize> Default for Matrix<M, N> {
     fn default() -> Self {
         Self::new()
