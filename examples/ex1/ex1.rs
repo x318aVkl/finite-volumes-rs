@@ -5,15 +5,28 @@
 
 */
 
-use finite_volumes::prelude::*;
+use finite_volumes::{prelude::*, refine::context::RefinementContext};
 
 
 fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
 
     // create the mesh
     let rank = world.rank() as usize;
+    let world_size = world.size() as usize;
 
-    let mesh: Mesh<2> = Mesh::read(std::io::BufReader::new(std::fs::File::open(if world.size() == 1 {"examples/ex1/mesh.msh".to_string()} else {format!("examples/ex1/mesh_{}.msh", rank)}.as_str()).unwrap()), Some(world)).unwrap();
+    let mut mesh: Mesh<2> = Mesh::read(std::io::BufReader::new(std::fs::File::open(if world.size() == 1 {"examples/ex1/mesh.msh".to_string()} else {format!("examples/ex1/mesh_{}.msh", rank)}.as_str()).unwrap()), Some(world)).unwrap();
+
+
+    // refine the mesh
+    if world_size == 1 {
+
+        mesh = RefinementContext::from_mesh(mesh)
+            .criteria(|cell| 1.0)
+            .level(0.5)
+            .refine()
+            .build();
+
+    }
 
     // compute and store the face flux for advection
     let mut flux = Field::<f64, geometry::Face, _>::from_mesh(&mesh);

@@ -12,7 +12,7 @@ pub mod source;
 pub use laplacian::laplacian;
 pub use convection::convection;
 pub use time::time;
-pub use source::linear_source;
+pub use source::{source, linear_source};
 
 pub mod operations;
 

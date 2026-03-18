@@ -465,7 +465,7 @@ impl<const DIM: usize> Mesh<DIM> {
                         self.face_data[fi].neighbor = InternalFaceNeighbor::Cell(CellIndex(self.cell_data.len() - 1));
                     },
                     _ => {
-                        panic!("Error, trying to add another cell to a face with neighbor: {:?}", self.face_data[fi].neighbor);
+                        panic!("Error, trying to add another cell to a face with neighbor: {:?}, face {}", self.face_data[fi].neighbor, fi);
                     }
                 }
             }
@@ -543,6 +543,10 @@ impl<const DIM: usize> Mesh<DIM> {
 
     pub fn iter_all_cells<'a>(&'a self) -> CellIterator<'a, DIM> {
         CellIterator { current: 0, mesh: self, skip_remote: false }
+    }
+
+    pub fn iter_patch<'a>(&'a self) -> PatchIterator<'a, DIM> {
+        PatchIterator { current: 0, mesh: self, initialized: false }
     }
 
     pub fn communicator<'a>(&'a self) -> Option<&'a SimpleCommunicator> {
@@ -728,6 +732,32 @@ impl<'a, const DIM: usize> Iterator for CellIterator<'a, DIM> {
 }
 
 
+pub struct PatchIterator<'a, const DIM: usize> {
+    current: usize,
+    mesh: &'a Mesh<DIM>,
+    initialized: bool,
+}
+
+impl<'a, const DIM: usize> Iterator for PatchIterator<'a, DIM> {
+    type Item = BoundaryPatch<'a, DIM>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.initialized {
+            self.initialized = true;
+
+            let pid = self.mesh.patch_name_ids[self.current].1;
+            return Some(self.mesh.patch(pid));
+        }
+        self.current += 1;
+        if self.current >= self.mesh.patch_name_ids.len() {
+            None
+        } else {
+            let pid = self.mesh.patch_name_ids[self.current].1;
+            Some(self.mesh.patch(pid))
+        }
+    }
+}
+
+
 
 
 impl<'a, const DIM: usize> BoundaryPatch<'a, DIM> {
@@ -752,8 +782,18 @@ impl<'a, const DIM: usize> BoundaryPatch<'a, DIM> {
         FaceIndex(self.mesh.patch_fstart_len[self.local_id].0)
     }
 
+    pub fn name(&self) -> &str {
+        self.mesh.patch_name_ids[self.local_id].0.as_str()
+    }
+
 }
 
+
+impl From<PatchIndex> for u16 {
+    fn from(value: PatchIndex) -> Self {
+        value.0
+    }
+}
 
 
 impl std::ops::Sub<FaceIndex> for FaceIndex {
@@ -762,3 +802,4 @@ impl std::ops::Sub<FaceIndex> for FaceIndex {
         FaceIndex(self.0 - rhs.0)
     }
 }
+
