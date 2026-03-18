@@ -10,7 +10,7 @@ mod pressure;
 
 use std::collections::HashMap;
 
-use finite_volumes::prelude::*;
+use finite_volumes::{core::mesh::PatchIndex, prelude::*};
 
 
 enum ProblemType {
@@ -27,18 +27,18 @@ enum BoundaryCondition<const DIM: usize> {
 }
 
 struct BoundaryConditionSet<const DIM: usize> {
-    bcs: HashMap<u16, BoundaryCondition<DIM>>,
+    bcs: HashMap<PatchIndex, BoundaryCondition<DIM>>,
 }
 
 impl<const DIM: usize> BoundaryConditionSet<DIM> {
     fn new() -> Self {
         Self { bcs: HashMap::new() }
     }
-    pub fn with(mut self, bid: u16, bc: BoundaryCondition<DIM>) -> Self {
+    pub fn with(mut self, bid: PatchIndex, bc: BoundaryCondition<DIM>) -> Self {
         self.bcs.insert(bid, bc);
         self
     }
-    fn get(&self, bid: u16) -> Option<&BoundaryCondition<DIM>> {
+    fn get(&self, bid: PatchIndex) -> Option<&BoundaryCondition<DIM>> {
         self.bcs.get(&bid)
     }
     fn velocity<'a>(&'a self)-> impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>) {
@@ -102,17 +102,17 @@ fn ex2<const DIM: usize>(
     let bcs = match problem {
         ProblemType::LidDriven => {
             BoundaryConditionSet::new()
-            .with(2, BoundaryCondition::MovingWall { wall_velocity })
-            .with(0, BoundaryCondition::Wall)
-            .with(1, BoundaryCondition::Wall)
-            .with(3, BoundaryCondition::Wall)
+            .with(mesh.patch_id("top").unwrap(), BoundaryCondition::MovingWall { wall_velocity })
+            .with(mesh.patch_id("bottom").unwrap(), BoundaryCondition::Wall)
+            .with(mesh.patch_id("left").unwrap(), BoundaryCondition::Wall)
+            .with(mesh.patch_id("right").unwrap(), BoundaryCondition::Wall)
         },
         ProblemType::Poiseuille => {
             BoundaryConditionSet::new()
-            .with(0, BoundaryCondition::Wall)
-            .with(1, BoundaryCondition::Outlet { pressure: 0.0 })
-            .with(2, BoundaryCondition::Wall)
-            .with(3, BoundaryCondition::Inlet { velocity: wall_velocity })
+            .with(mesh.patch_id("top").unwrap(), BoundaryCondition::Wall)
+            .with(mesh.patch_id("bottom").unwrap(), BoundaryCondition::Wall)
+            .with(mesh.patch_id("left").unwrap(), BoundaryCondition::Inlet { velocity: wall_velocity })
+            .with(mesh.patch_id("right").unwrap(), BoundaryCondition::Outlet { pressure: 0.0 })
         }
     };
 

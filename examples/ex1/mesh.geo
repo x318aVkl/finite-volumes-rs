@@ -15,8 +15,8 @@ Curve Loop(1) = {1, 2, 3, 4};
 Plane Surface(1) = {1};
 
 
-Physical Curve(0) = {1, 2, 3, 4};
-Physical Surface(0) = {1};
+Physical Curve("sides") = {1, 2, 3, 4};
+Physical Surface("internal") = {1};
 
 //Mesh.MeshSizeFromPoints = 1;
 

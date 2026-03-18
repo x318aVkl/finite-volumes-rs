@@ -154,6 +154,39 @@ impl<const DIM: usize> Mesh<DIM> {
             }
         }
 
+
+        // compute the boundary patches face start
+        {
+            let mut currbndp = None;
+
+            assert!(self.patch_fstart_len.len() > 0);
+            assert!(self.patch_name_ids.len() > 0);
+
+            for fid in 0..self.n_local_faces {
+                match self.face_boundaries[fid] {
+                    Some(b) => {
+                        if currbndp.is_none() || (currbndp.unwrap() != b) {
+                            // start of a new face block
+                            currbndp = Some(b);
+
+                            let local_id = *self.patch_id_to_lid.get(&b).expect("contains patch id");
+                            self.patch_fstart_len[local_id].0 = fid;
+                        }
+                    },
+                    None => {}
+                }
+            }
+            
+            if self.patch_fstart_len.len() > 1 {
+                for i in 0..(self.patch_fstart_len.len() - 1) {
+                    self.patch_fstart_len[i].1 = self.patch_fstart_len[i+1].0 - self.patch_fstart_len[i].0;
+                }
+            }
+
+            let i = self.patch_fstart_len.len() - 1;
+            self.patch_fstart_len[i].1 = self.n_local_faces - self.patch_fstart_len[i].0;
+        }
+
         self.computed = true;
         Ok(())
     }

@@ -143,6 +143,7 @@ impl<const DIM: usize> Mesh<DIM> {
             let mut local_face_ids: Vec<Option<FaceIndex>> = vec![None; self.n_faces()];
             let mut max_face_id: usize = 0;
 
+            let mut bndfacestart = 0;
             for (rank, fid) in faces_to_add {
                 // add the face
                 let mut node_buffer = [NodeIndex(0); 64];
@@ -165,7 +166,14 @@ impl<const DIM: usize> Mesh<DIM> {
                     node_buffer[k] = n;
                 }
 
-                partmesh.add_face(&node_buffer[0..face.n_nodes()], face.boundary(), if rank == -1 {Ownership::Owned} else {Ownership::Remote(rank as usize)}, Some(fid as u32));
+                match face.boundary() {
+                    Some(_) => {
+                        bndfacestart = bndfacestart.min(max_face_id);
+                    },
+                    None => {}
+                }
+
+                partmesh.add_face(&node_buffer[0..face.n_nodes()], match face.boundary() {Some(b) => Some(b.0), None => None}, if rank == -1 {Ownership::Owned} else {Ownership::Remote(rank as usize)}, Some(fid as u32));
 
                 local_face_ids[usize::from(fid)] = Some(FaceIndex(max_face_id));
                 max_face_id += 1;
@@ -187,6 +195,12 @@ impl<const DIM: usize> Mesh<DIM> {
                 }
                 partmesh.add_cell(&face_buffer[0..cell.n_faces()],if rank == -1 {Ownership::Owned} else {Ownership::Remote(rank as usize)}, Some(ncid as u32));
             }
+
+            // copy the patches
+            for (name, id) in self.patch_name_ids.iter() {
+                partmesh.add_patch(id.0, name.as_str(), Some((FaceIndex(bndfacestart), 0)))?;
+            }
+                
 
 
             partmesh.compute()?;

@@ -7,6 +7,7 @@ pub enum Error {
     WrongMeshFileDimension(usize),
     MeshReadError{line: usize},
     MeshDimensionReadError,
+    MeshPatchAlreadyExists(u16, String),
 
     ParseError(String),
 

@@ -10,7 +10,7 @@ pub mod geometry;
 pub mod compute;
 pub mod examples;
 
-use std::usize;
+use std::{collections::HashMap, usize};
 
 pub use geometry::Geometry;
 
@@ -28,6 +28,12 @@ pub struct FaceIndex(usize);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CellIndex(usize);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PatchIndex(u16);
+
+
+
 
 
 impl From<NodeIndex> for usize {
@@ -107,12 +113,12 @@ impl std::fmt::Display for CellIndex {
 
 #[derive(Clone, Copy, Debug)]
 pub enum FaceNeighbor {
-    Boundary(u16),
+    Boundary(PatchIndex),
     Cell(CellIndex),
 }
 #[derive(Clone, Copy, Debug)]
 enum InternalFaceNeighbor {
-    Boundary(u16),
+    Boundary(PatchIndex),
     Cell(CellIndex),
     None,
 }
@@ -183,6 +189,13 @@ impl<'a, const DIM: usize> std::fmt::Debug for CellRef<'a, DIM> {
 }
 
 
+pub struct BoundaryPatch<'a, const DIM: usize> {
+    bid: PatchIndex,
+    local_id: usize,
+    mesh: &'a Mesh<DIM>,
+}
+
+
 /// Represents a mesh for mixed fvm-fem representation
 pub struct Mesh<const DIM: usize> {
 
@@ -201,7 +214,7 @@ pub struct Mesh<const DIM: usize> {
     face_data: Vec<FaceData<DIM>>,
     cell_data: Vec<CellData<DIM>>,
 
-    face_boundaries: Vec<Option<u16>>,
+    face_boundaries: Vec<Option<PatchIndex>>,
 
     n_local_faces: usize,
     n_local_cells: usize,
@@ -209,6 +222,13 @@ pub struct Mesh<const DIM: usize> {
     computed: bool,
 
     mpi_comm: Option<SimpleCommunicator>,
+
+
+    patch_id_to_lid: HashMap<PatchIndex, usize>,
+    patch_name_ids: Vec<(String, PatchIndex)>,
+    patch_fstart_len: Vec<(usize, usize)>,
+
+    patch_name_id_map: HashMap<String, PatchIndex>,
 
 }
 
@@ -239,7 +259,7 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
     pub fn normal(&self) -> Vector<DIM> {
         self.data.normal
     }
-    pub fn boundary(&self) -> Option<u16> {
+    pub fn boundary(&self) -> Option<PatchIndex> {
         self.mesh.face_boundaries[usize::from(self.id)]
     }
     pub fn nodes(&self) -> &[NodeIndex] {
@@ -364,6 +384,10 @@ impl<const DIM: usize> Mesh<DIM> {
             n_local_cells: 0,
             computed: false,
             mpi_comm,
+            patch_id_to_lid: HashMap::new(),
+            patch_name_ids: vec![],
+            patch_fstart_len: vec![],
+            patch_name_id_map: HashMap::new(),
         }
     }
 
@@ -382,7 +406,7 @@ impl<const DIM: usize> Mesh<DIM> {
         }
         self.face_nodes.close_major();
 
-        self.face_boundaries.push(boundary);
+        self.face_boundaries.push(match boundary {Some(b) => Some(PatchIndex(b)), None => None});
 
         let fid = self.face_data.iter().len() as u32;
 
@@ -396,7 +420,7 @@ impl<const DIM: usize> Mesh<DIM> {
             center: Vector::new(), 
             normal: Vector::new(), 
             owner_cell: CellIndex(usize::MAX),
-            neighbor: match boundary {Some(i) => InternalFaceNeighbor::Boundary(i), None => InternalFaceNeighbor::None},
+            neighbor: match boundary {Some(i) => InternalFaceNeighbor::Boundary(PatchIndex(i)), None => InternalFaceNeighbor::None},
             ownership, 
             global_id: match global_id {
                 Some(v) => v,
@@ -540,6 +564,40 @@ impl<const DIM: usize> Mesh<DIM> {
         &self.cell_to_cell
     }
 
+    pub fn patch<'a>(&'a self, id: PatchIndex) -> BoundaryPatch<'a, DIM> {
+        let lid = *self.patch_id_to_lid.get(&id).expect("boundary patch contains id");
+        BoundaryPatch { bid: id, local_id: lid, mesh: self }
+    }
+
+    pub fn add_patch(&mut self, id: u16, name: &str, faceinfo: Option<(FaceIndex, usize)>) -> Result<(), crate::error::Error> {
+        let id = PatchIndex(id);
+
+        if self.patch_id_to_lid.contains_key(&id) {
+            return Err(crate::error::Error::MeshPatchAlreadyExists(id.0, name.to_string()));
+        }
+
+        let lid = self.patch_name_ids.len();
+        self.patch_id_to_lid.insert(id, lid);
+
+        self.patch_name_ids.push((name.to_string(), id));
+        self.patch_name_id_map.insert(name.to_string(), id);
+
+        match faceinfo {
+            Some(info) => {
+                self.patch_fstart_len.push((usize::from(info.0), info.1));
+            },
+            None => {
+                self.patch_fstart_len.push((0, 0));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn patch_id(&self, name: &str) -> Option<PatchIndex> {
+        self.patch_name_id_map.get(name).copied()
+    }
+
 }
 
 
@@ -666,5 +724,41 @@ impl<'a, const DIM: usize> Iterator for CellIterator<'a, DIM> {
             self.current += 1;
             Some(out)
         }
+    }
+}
+
+
+
+
+impl<'a, const DIM: usize> BoundaryPatch<'a, DIM> {
+
+
+    pub fn len(&self) -> usize {
+        self.mesh.patch_fstart_len[self.local_id].1
+    }
+
+    pub fn iter<'b>(&'b self) -> impl Iterator<Item = FaceRef<'b, DIM>> {
+        let (fstart, len) = self.mesh.patch_fstart_len[self.local_id];
+        (fstart..(fstart+len)).map(|f| {
+            self.mesh.face(FaceIndex(f))
+        })
+    }
+
+    pub fn id(&self) -> PatchIndex {
+        self.bid
+    }
+
+    pub fn face_start(&self) -> FaceIndex {
+        FaceIndex(self.mesh.patch_fstart_len[self.local_id].0)
+    }
+
+}
+
+
+
+impl std::ops::Sub<FaceIndex> for FaceIndex {
+    type Output = Self;
+    fn sub(self, rhs: FaceIndex) -> Self::Output {
+        FaceIndex(self.0 - rhs.0)
     }
 }

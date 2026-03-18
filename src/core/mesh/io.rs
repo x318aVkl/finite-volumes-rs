@@ -12,6 +12,13 @@ impl<const DIM: usize> Mesh<DIM> {
 
         write!(w, "NDIME={}\n", DIM)?;
 
+        write!(w, "NPATCH={}\n", self.patch_name_ids.len())?;
+        for local_id in 0..self.patch_name_ids.len() {
+            let (name, bid) = &self.patch_name_ids[local_id];
+            let (fstart, len) = self.patch_fstart_len[local_id];
+            write!(w, "{} {} {} {}\n", name, bid.0, fstart, len)?;
+        }
+
         write!(w, "NNODES={}\n", self.n_total_nodes())?;
         for n in 0..self.n_total_nodes() {
             let n = self.nodes[n];
@@ -28,7 +35,7 @@ impl<const DIM: usize> Mesh<DIM> {
                 write!(w, " {}", usize::from(*n))?;
             }
             match face.boundary() {
-                Some(v) => write!(w, " {}", v),
+                Some(v) => write!(w, " {}", v.0),
                 None => write!(w, " -")
             }?;
             
@@ -69,6 +76,7 @@ impl<const DIM: usize> Mesh<DIM> {
         let mut nodes_to_read = 0;
         let mut faces_to_read = 0;
         let mut cells_to_read = 0;
+        let mut patch_to_read = 0;
         for line in reader.lines().map_while(Result::ok) {
             line_id += 1;
             let ls = line.trim();
@@ -91,6 +99,8 @@ impl<const DIM: usize> Mesh<DIM> {
                     faces_to_read = val;
                 } else if section == "NCELLS" {
                     cells_to_read = val;
+                } else if section == "NPATCH" {
+                    patch_to_read = val;
                 }
                 
                 continue;
@@ -169,6 +179,22 @@ impl<const DIM: usize> Mesh<DIM> {
                 mesh.add_cell(&faces[0..size], ownership, Some(gid));
 
                 cells_to_read -= 1;
+            } else if section == "NPATCH" {
+                if patch_to_read == 0 {continue}
+
+                let mut ls = ls.split(" ");
+
+                let name = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?;
+
+                let bid: u16 = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+
+                let fstart: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+
+                let len: usize = ls.nth(0).ok_or(Box::new(crate::error::Error::MeshReadError { line: line_id - 1 }))?.parse()?;
+
+                mesh.add_patch(bid, name, Some((FaceIndex::from(fstart), len)))?;
+
+                patch_to_read -= 1;
             }
 
         }
@@ -267,7 +293,7 @@ impl<const DIM: usize> Mesh<DIM> {
     }
 
 
-    fn read_su2_boundaries<R: std::io::BufRead>(reader: &mut R, _mesh: &mut Mesh<DIM>) -> Result<HashMap<Vec<usize>, u16>, Box<dyn std::error::Error>> {
+    fn read_su2_boundaries<R: std::io::BufRead>(reader: &mut R, mesh: &mut Mesh<DIM>) -> Result<HashMap<Vec<usize>, u16>, Box<dyn std::error::Error>> {
 
         let mut face_boundaries: HashMap<Vec<usize>, u16> = HashMap::new();
 
@@ -304,7 +330,7 @@ impl<const DIM: usize> Mesh<DIM> {
 
             if line.contains("MARKER_TAG=") {
                 
-                //let mark_name = line.split("=").nth(1).expect("found marker name").trim();
+                let mark_name = line.split("=").nth(1).expect("found marker name").trim();
                 match current_mark {
                     None => {current_mark = Some(0);}
                     Some(v) => {current_mark = Some(v + 1);}
@@ -312,9 +338,9 @@ impl<const DIM: usize> Mesh<DIM> {
 
                 //println!("mark name = {}", mark_name);
 
-                //let mark_id = current_mark.unwrap();
+                let mark_id = current_mark.unwrap();
 
-                //mesh.add_boundary(mark_id, mark_name)?;
+                mesh.add_patch(mark_id, mark_name, None)?;
 
                 current_elem = 0;
             }
