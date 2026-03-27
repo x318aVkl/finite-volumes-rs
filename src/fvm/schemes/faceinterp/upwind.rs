@@ -19,7 +19,7 @@ impl<'a, T, Lhs, const DIM: usize> Upwind<'a, T, Lhs, DIM> {
     }
 }
 
-impl<'b, Lhs, const DIM: usize, T> FaceInterpolationScheme<DIM> for Upwind<'b, Lhs, T, DIM> where Lhs: Unit + Zero, T: Zero {
+impl<'b, Lhs, const DIM: usize, T> FaceInterpolationScheme<DIM> for Upwind<'b, T, Lhs, DIM> where Lhs: Unit + Zero, T: Zero {
     type Lhs = Lhs;
     type Rhs = T;
 

@@ -16,14 +16,14 @@ Plane Surface(1) = {1};
 
 
 
-Transfinite Curve{1, 2, 3, 4} = 3;
+Transfinite Curve{1, 2, 3, 4} = 11;
 Transfinite Surface{1};
 
 Recombine Surface{1};
 
 //+
 Extrude {0, 0, 1} {
-  Surface{1}; Layers {2}; Recombine;
+  Surface{1}; Layers {10}; Recombine;
 }
 
 Physical Surface("sides") = {1, 13, 17, 21, 25, 26};

@@ -139,9 +139,9 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
             &mut u_lim, 
             &u, 
             &u_grad, 
-            &phi, 
             schemes::limiters::LimitedLinear(0.5),
-            schemes::facengrad::Orthogonal::<Vector<4>, f64>::new(), 
+            schemes::faceinterp::Upwind::<_, f64, 2>::new(&phi),
+            schemes::facengrad::Orthogonal::<_, f64>::new(), 
             boundary_condition(), 
             &mesh
         );

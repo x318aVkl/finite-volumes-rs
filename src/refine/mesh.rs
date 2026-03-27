@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{Mesh, Vector, core::{Sparsity, mesh::{NodeIndex, Ownership, PatchIndex}}, prelude::{FaceIndex, Zero}};
+use crate::{Mesh, Vector, core::{Sparsity, mesh::{NodeIndex, Ownership, PatchIndex}}, prelude::{FaceIndex, FaceNeighbor, Zero}, refine::context::RefCommand};
 
 // note: does not work for one dimensional meshes
 // only 2D or 3D meshes
@@ -11,6 +11,7 @@ pub struct EdgeData {
     child_edges: Option<(usize, usize)>,
     parent_edge: Option<usize>,
     child_middle_node: Option<usize>,
+    refinement_level: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -21,6 +22,7 @@ pub struct FaceData {
     refined_size: Option<usize>,
     refined_centernode: Option<usize>,
     parent_face: Option<usize>,
+    refinement_level: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -30,6 +32,7 @@ pub struct CellData {
     parent_cell: Option<usize>,
     refined_cstart: Option<usize>,
     refined_len: Option<usize>,
+    refinement_level: usize,
 }
 
 
@@ -55,6 +58,11 @@ pub struct RefinementMesh<const DIM: usize> {
 
     patch_info: Vec<(String, PatchIndex)>,
 
+    cell_leaf_ids: Vec<Option<usize>>,
+    cell_leaf_to_local_id: HashMap<usize, usize>,
+
+    leaf_node_neighbors: Sparsity<usize>,
+
 }
 
 
@@ -73,6 +81,9 @@ impl<const DIM: usize> RefinementMesh<DIM> {
             cell_data: vec![],
             edge_hash: HashMap::new(),
             patch_info: vec![],
+            cell_leaf_ids: vec![],
+            cell_leaf_to_local_id: HashMap::new(),
+            leaf_node_neighbors: Sparsity::new(),
         };
 
         for patch in mesh.iter_patch() {
@@ -84,6 +95,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
         }
 
         let mut edges_hash = HashMap::<(usize, usize), usize>::new();
+        let mut node_cells = HashMap::<usize, HashSet<usize>>::new();
 
         for f in mesh.iter_all_faces() {
 
@@ -106,13 +118,45 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                     }
                 };
 
+                let c0 = usize::from(f.owner());
+                match f.neighbor() {
+                    FaceNeighbor::Cell(c1) => {
+                        let c1 = usize::from(c1);
+
+                        match node_cells.get_mut(&i) {
+                            Some(nc) => {
+                                nc.insert(c0);
+                                nc.insert(c1);
+                            },
+                            None => {
+                                let mut nc = HashSet::new();
+                                nc.insert(c0);
+                                nc.insert(c1);
+                                node_cells.insert(i, nc);
+                            }
+                        }
+                    },
+                    FaceNeighbor::Boundary(_) => {
+                        match node_cells.get_mut(&i) {
+                            Some(nc) => {
+                                nc.insert(c0);
+                            },
+                            None => {
+                                let mut nc = HashSet::new();
+                                nc.insert(c0);
+                                node_cells.insert(i, nc);
+                            }
+                        }
+                    }
+                };
+
                 rmesh.face_edges.push_to_major(edge);
             }
             rmesh.face_edges.close_major();
-            rmesh.face_data.push(FaceData { boundary: f.boundary(), owner: f.ownership(), refined_fstart: None, refined_size: None, refined_centernode: None, parent_face: None, });
+            rmesh.face_data.push(FaceData { boundary: f.boundary(), owner: f.ownership(), refined_fstart: None, refined_size: None, refined_centernode: None, parent_face: None, refinement_level: 0, });
         }
 
-        rmesh.edge_data = vec![EdgeData {child_edges: None, parent_edge: None, child_middle_node: None}; edges_hash.len()];
+        rmesh.edge_data = vec![EdgeData {child_edges: None, parent_edge: None, child_middle_node: None, refinement_level: 0}; edges_hash.len()];
         rmesh.edge_hash = edges_hash;
 
         for c in mesh.iter_all_cells() {
@@ -121,7 +165,27 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                 rmesh.cell_faces.push_to_major(f);
             }
             rmesh.cell_faces.close_major();
-            rmesh.cell_data.push(CellData { owner: c.ownership(), original_cell: Some(usize::from(c.id())), parent_cell: None, refined_cstart: None, refined_len: None });
+            rmesh.cell_data.push(CellData { owner: c.ownership(), original_cell: Some(usize::from(c.id())), parent_cell: None, refined_cstart: None, refined_len: None, refinement_level: 0 });
+            let cid = usize::from(c.id());
+            rmesh.cell_leaf_ids.push(Some(cid));
+            rmesh.cell_leaf_to_local_id.insert(cid, cid);
+
+            let mut cell_to_cell = HashSet::new();
+            for f in c.faces() {
+                let f = mesh.face(*f);
+                for n in f.nodes() {
+                    let n = usize::from(*n);
+                    for oc in node_cells.get(&n).unwrap() {
+                        cell_to_cell.insert(*oc);
+                    }
+                }
+            }
+            for oc in cell_to_cell {
+                if oc != usize::from(c.id()) {
+                    rmesh.leaf_node_neighbors.push_to_major(oc);
+                }
+            }
+            rmesh.leaf_node_neighbors.close_major();
         }
 
         rmesh
@@ -129,34 +193,255 @@ impl<const DIM: usize> RefinementMesh<DIM> {
 
 
 
-    pub fn refine(&mut self, criteria: &[f64], level: f64) {
+    pub fn compute_refinement_order(&self, order: &mut Vec<Option<(usize, super::context::RefCommand)>>, criteria: &[f64], level: f64) {
+        order.resize(self.cell_data.len(), None);
 
-        let mut c = 0;
-        let mut started: bool = false;
-        loop {
-            if started {
-                c += 1;
-            }
-            started = true;
-            if c >= self.cell_data.len() {
-                break;
-            }
+        // first figure out which cells have to be refined due do the criteria
+        // without balancing
+        for c in 0..self.cell_data.len() {
             
             // do not refine again cells that are already refined, so that dont have an original cell
-            let orig_cell = if let Some(co) = self.cell_data[c].original_cell {
+            // only refine leaf cells
+            // let orig_cell = if let Some(co) = self.cell_data[c].original_cell {
+            //     co
+            // } else {
+            //     continue;
+            // };
+            let leaf_id = if let Some(co) = self.cell_leaf_ids[c] {
+                co
+            } else {
+                continue;
+            };
+            
+            let crit = criteria[leaf_id];
+
+            if crit > level {
+                // refinement needed
+                order[c] = Some((0, RefCommand::Refine));
+            }
+        }
+
+        // now do the rebalancing process
+        // any cell that has neighbor refined cells that any connected leaf will be refined
+        // also has to be refined
+        loop {
+            let mut nupdated = 0;
+            for c in 0..self.cell_data.len() {
+
+                // no need to check cells that are already refined
+                if order[c].is_some() {
+                    continue;
+                }
+
+                // only check leaf cells
+                let leaf_id = if let Some(co) = self.cell_leaf_ids[c] {
+                    co
+                } else {
+                    continue;
+                };
+
+                let orig_ref_level = self.cell_data[c].refinement_level;
+
+                for leaf_neighbor in self.leaf_node_neighbors.major_range(leaf_id) {
+                    let local_neighbor = *self.cell_leaf_to_local_id.get(leaf_neighbor).unwrap();
+
+                    let leaf_ref_level = self.cell_data[local_neighbor].refinement_level;
+
+                    if (leaf_ref_level > orig_ref_level) && (order[local_neighbor].is_some()) {
+                        // we need to refine this cell before the leaf neighbor
+                        let order_n = order[local_neighbor].unwrap();
+                        order[c] = Some((order_n.0 + 1, RefCommand::Refine));
+                        nupdated += 1;
+                        break;
+                    }
+                }
+
+            }
+            //println!("nupdated = {}", nupdated);
+            if nupdated == 0 {
+                break;
+            }
+        }
+    }
+
+
+
+    pub fn refine(&mut self, order: &[Option<(usize, RefCommand)>]) {
+
+        // figure out the max order
+        let mut max_order = 0;
+        for i in 0..order.len() {
+            if let Some(oi) = order[i] {
+                max_order = max_order.max(oi.0);
+            }
+        }
+
+        for current_order in (0..=max_order).rev() {
+
+            let mut c = 0;
+            let mut started: bool = false;
+            loop {
+                if started {
+                    c += 1;
+                }
+                started = true;
+                if c >= self.cell_data.len() {
+                    break;
+                }
+                if c >= self.cell_leaf_ids.len() {
+                    // we went over all the previous cells and are in the new leaf cells
+                    // do not refine them
+                    break;
+                }
+
+                
+                
+                // do not refine again cells that are already refined, so that dont have an original cell
+                // only refine leaf cells
+                // let orig_cell = if let Some(co) = self.cell_data[c].original_cell {
+                //     co
+                // } else {
+                //     continue;
+                // };
+                // let leaf_id = if let Some(co) = self.cell_leaf_ids[c] {
+                //     co
+                // } else {
+                //     continue;
+                // };
+
+                // only run refinement for leaf cells
+                if self.cell_leaf_ids[c].is_none() {
+                    continue;
+                }
+                
+                if let Some((order, _command)) = order[c] {
+
+                    if order == current_order {
+                        // refinement needed
+
+                        self.refine_cell(c);
+                    }
+                }
+            }
+        }
+
+        // update the local cell ids
+        // and the leaf cell to cell node connectivity
+        let mut leaf_cell_id: usize = 0;
+        self.cell_leaf_ids.clear();
+        self.cell_leaf_ids.resize(self.cell_data.len(), None);
+        self.cell_leaf_to_local_id.clear();
+        for c in 0..self.cell_data.len() {
+            // if this cell is refined, skip it
+            if self.cell_data[c].refined_cstart.is_some() {
+                continue;
+            }
+
+            // leaf cell, add its id
+            self.cell_leaf_ids[c] = Some(leaf_cell_id);
+            self.cell_leaf_to_local_id.insert(leaf_cell_id, c);
+            leaf_cell_id += 1;
+        }
+
+        // rebuild the cell to cell connectivity
+        let nleafcells = leaf_cell_id;
+
+        let mut node_leaf_cells = HashMap::<usize, HashSet<usize>>::new();
+        node_leaf_cells.reserve(self.nodes.len());
+
+        let mut leaf_cell_nodes = HashMap::<usize, HashSet<usize>>::new();
+        leaf_cell_nodes.reserve(nleafcells);
+
+        for c in 0..self.cell_data.len() {
+
+            // only add it to the map if its a leaf node
+            let leaf_id = if let Some(co) = self.cell_leaf_ids[c] {
                 co
             } else {
                 continue;
             };
 
-            let crit = criteria[orig_cell];
+            for f in self.cell_faces.major_range(c) {
+                if self.face_data[*f].refined_fstart.is_some() {
+                    // this is a refined face
+                    let rfstart = self.face_data[*f].refined_fstart.unwrap();
+                    let rfsize = self.face_data[*f].refined_size.unwrap();
+                    for subface in rfstart..(rfstart + rfsize) {
+                        assert!(self.face_data[subface].refined_fstart.is_none());
 
-            if crit > level {
-                // refinement needed
+                        for e in self.face_edges.major_range(subface) {
+                            let (n0, n1) = self.edge_nodes[*e];
 
-                self.refine_cell(c);
+                            for n in [n0, n1] {
+                                match node_leaf_cells.get_mut(&n) {
+                                    Some(nlfc) => {
+                                        nlfc.insert(leaf_id);
+                                    },
+                                    None => {
+                                        let mut nlfc = HashSet::new();
+                                        nlfc.insert(leaf_id);
+                                        node_leaf_cells.insert(n, nlfc);
+                                    }
+                                }
+                                match leaf_cell_nodes.get_mut(&leaf_id) {
+                                    Some(nlfc) => {
+                                        nlfc.insert(n);
+                                    },
+                                    None => {
+                                        let mut nlfc = HashSet::new();
+                                        nlfc.insert(n);
+                                        leaf_cell_nodes.insert(leaf_id, nlfc);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // this face is not refined
+                    for e in self.face_edges.major_range(*f) {
+                        let (n0, n1) = self.edge_nodes[*e];
+
+                        for n in [n0, n1] {
+                            match node_leaf_cells.get_mut(&n) {
+                                Some(nlfc) => {
+                                    nlfc.insert(leaf_id);
+                                },
+                                None => {
+                                    let mut nlfc = HashSet::new();
+                                    nlfc.insert(leaf_id);
+                                    node_leaf_cells.insert(n, nlfc);
+                                }
+                            }
+                            match leaf_cell_nodes.get_mut(&leaf_id) {
+                                Some(nlfc) => {
+                                    nlfc.insert(n);
+                                },
+                                None => {
+                                    let mut nlfc = HashSet::new();
+                                    nlfc.insert(n);
+                                    leaf_cell_nodes.insert(leaf_id, nlfc);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+
+        // now that we have the leaf cell connectivity, update it to its compact sparsity form
+        self.leaf_node_neighbors = Sparsity::new();
+        for leaf_id in 0..nleafcells {
+
+            for node in leaf_cell_nodes.get(&leaf_id).unwrap() {
+                for ocell in node_leaf_cells.get(node).unwrap() {
+                    if *ocell != leaf_id {
+                        self.leaf_node_neighbors.push_to_major(*ocell);
+                    }
+                }
             }
 
+            self.leaf_node_neighbors.close_major();
         }
 
     }
@@ -166,6 +451,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
     fn refine_cell(&mut self, cell: usize) {
 
         let orig_cell_data = self.cell_data[cell];
+        let orig_refinement_level = orig_cell_data.refinement_level;
         
         // we need the unique nodes to build the cells afterwards
         let mut nodes = HashSet::new();
@@ -258,8 +544,8 @@ impl<const DIM: usize> RefinementMesh<DIM> {
             
 
             // add the face center to cell center edge
-            let ec0 = self.add_edge((f0cn, center_node), EdgeData { child_edges: None, parent_edge: None, child_middle_node: None });
-            let ec1 = self.add_edge((f1cn, center_node), EdgeData { child_edges: None, parent_edge: None, child_middle_node: None });
+            let ec0 = self.add_edge((f0cn, center_node), EdgeData { child_edges: None, parent_edge: None, child_middle_node: None, refinement_level: orig_refinement_level + 1 });
+            let ec1 = self.add_edge((f1cn, center_node), EdgeData { child_edges: None, parent_edge: None, child_middle_node: None, refinement_level: orig_refinement_level + 1 });
 
             // add the face
             self.face_edges.push_to_major(efe0);
@@ -268,7 +554,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
             self.face_edges.push_to_major(efe1);
             self.face_edges.close_major();
 
-            self.face_data.push(FaceData { boundary: None, owner: orig_cell_data.owner, refined_fstart: None, refined_size: None, refined_centernode: None, parent_face: None });
+            self.face_data.push(FaceData { boundary: None, owner: orig_cell_data.owner, refined_fstart: None, refined_size: None, refined_centernode: None, parent_face: None, refinement_level: orig_refinement_level + 1 });
 
             edge_newfaces.insert(edge, self.face_data.len() - 1);
         }
@@ -319,7 +605,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
             }
             self.cell_faces.close_major();
 
-            self.cell_data.push(CellData { owner: orig_cell_data.owner, original_cell: None, parent_cell: Some(cell), refined_cstart: None, refined_len: None })
+            self.cell_data.push(CellData { owner: orig_cell_data.owner, original_cell: None, parent_cell: Some(cell), refined_cstart: None, refined_len: None, refinement_level: orig_refinement_level + 1 })
 
         }
 
@@ -332,6 +618,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
     fn refine_face(&mut self, face: usize) {
 
         let owner_data = self.face_data[face];
+        let orig_refinement_level = owner_data.refinement_level;
 
         let mut nodes = HashSet::new();
         let mut node_edges = HashMap::<usize, HashSet<usize>>::new();
@@ -378,7 +665,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
 
             let nmid = self.edge_data[e].child_middle_node.unwrap();
 
-            let newedge = self.add_edge((nmid, center_node), EdgeData { child_edges: None, parent_edge: None, child_middle_node: None });
+            let newedge = self.add_edge((nmid, center_node), EdgeData { child_edges: None, parent_edge: None, child_middle_node: None, refinement_level: orig_refinement_level + 1 });
             
             new_edges_centeredge.insert(e, newedge);
         }
@@ -403,12 +690,19 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                 let (e0, e1) = self.edge_data[edge].child_edges.unwrap();
                 
                 let eref = {
-                    if self.edge_nodes[e0].0 == node || self.edge_nodes[e0].1 == node {
+                    if (self.edge_nodes[e0].0 == node) || (self.edge_nodes[e0].1 == node) {
                         e0
                     } else {
                         e1
                     }
                 };
+                if !((self.edge_nodes[eref].0 == node) || (self.edge_nodes[eref].1 == node)) {
+                    println!("ERROR for node {}", node);
+                    println!("{:?}", self.edge_nodes[edge]);
+                    println!("{:?}", self.edge_nodes[e0]);
+                    println!("{:?}", self.edge_nodes[e1]);
+                    panic!();
+                }
 
                 let ecent = *new_edges_centeredge.get(&edge).unwrap();
 
@@ -421,7 +715,6 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                 }
             }
 
-
             assert_eq!(newedges.len(), 4);
 
             // build the new refined face
@@ -430,7 +723,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
             }
             self.face_edges.close_major();
 
-            self.face_data.push(FaceData { boundary: owner_data.boundary, owner: owner_data.owner, refined_fstart: None, refined_size: None, refined_centernode: None, parent_face: Some(face) })
+            self.face_data.push(FaceData { boundary: owner_data.boundary, owner: owner_data.owner, refined_fstart: None, refined_size: None, refined_centernode: None, parent_face: Some(face), refinement_level: orig_refinement_level + 1 });
         }
 
         // update the face data
@@ -445,6 +738,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
 
         // guard against refinining already refined edges
         if self.edge_data[edge].child_edges.is_some() {return}
+        let orig_refinement_level = self.edge_data[edge].refinement_level;
 
         let (n0, n1) = self.edge_nodes[edge];
 
@@ -454,8 +748,8 @@ impl<const DIM: usize> RefinementMesh<DIM> {
 
         // add the new edges
 
-        let ne0 = self.add_edge((n0, n2), EdgeData { child_edges: None, parent_edge: Some(edge), child_middle_node: None });
-        let ne1 = self.add_edge((n1, n2), EdgeData { child_edges: None, parent_edge: Some(edge), child_middle_node: None });
+        let ne0 = self.add_edge((n0, n2), EdgeData { child_edges: None, parent_edge: Some(edge), child_middle_node: None, refinement_level: orig_refinement_level + 1 });
+        let ne1 = self.add_edge((n1, n2), EdgeData { child_edges: None, parent_edge: Some(edge), child_middle_node: None, refinement_level: orig_refinement_level + 1 });
 
         // update this edge data
         self.edge_data[edge].child_edges = Some((ne0, ne1));
@@ -468,12 +762,22 @@ impl<const DIM: usize> RefinementMesh<DIM> {
     fn add_edge(&mut self, edge: (usize, usize), data: EdgeData) -> usize {
         let edge = (edge.0.min(edge.1), edge.0.max(edge.1));
 
+        // try to add it
+        // if it already exists, return the existing value
+        let edge_id = match self.edge_hash.get(&edge) {
+            Some(id) => {
+                return *id;
+            },
+            None => {
+                self.edge_hash.insert(edge, self.edge_nodes.len());
+                self.edge_nodes.len()
+            }
+        };
+
         self.edge_nodes.push(edge);
         self.edge_data.push(data);
-        
-        self.edge_hash.insert(edge, self.edge_nodes.len() - 1);
 
-        self.edge_nodes.len() - 1
+        edge_id
     }
 
 
@@ -523,22 +827,34 @@ impl<const DIM: usize> RefinementMesh<DIM> {
 
             // get its nodes in order
             let mut nodes: Vec<NodeIndex> = vec![];
+            //let nodes_e1 = self.edge_nodes[self.face_edges.major_range(f)[1]];
             let nodes_e1 = self.edge_nodes[self.face_edges.major_range(f)[self.face_edges.major_range(f).len() - 1]];
             for e in self.face_edges.major_range(f) {
                 let (n0, n1) = self.edge_nodes[*e];
 
                 if nodes.len() == 0 {
-                    // add only the first one, the node shared by the second edge
+                    // add only the first one, the node shared by the end edge
                     if (n0 == nodes_e1.0) || (n0 == nodes_e1.1) {
                         nodes.push(NodeIndex::from(n0));
+                        if let Some(n2) = self.edge_data[*e].child_middle_node {
+                            nodes.push(NodeIndex::from(n2));
+                        }
                         nodes.push(NodeIndex::from(n1));
                     } else if (n1 == nodes_e1.0) || (n1 == nodes_e1.1) {
                         nodes.push(NodeIndex::from(n1));
+                        if let Some(n2) = self.edge_data[*e].child_middle_node {
+                            nodes.push(NodeIndex::from(n2));
+                        }
                         nodes.push(NodeIndex::from(n0));
                     } else {
                         panic!("node not found!");
                     }
+
                     continue;
+                }
+
+                if let Some(n2) = self.edge_data[*e].child_middle_node {
+                    nodes.push(NodeIndex::from(n2));
                 }
 
                 if !nodes.contains(&NodeIndex::from(n0)) {
@@ -586,9 +902,15 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                         // add only the first one, the node shared by the second edge
                         if (n0 == nodes_e1.0) || (n0 == nodes_e1.1) {
                             nodes.push(NodeIndex::from(n0));
+                            if let Some(n2) = self.edge_data[*e].child_middle_node {
+                                nodes.push(NodeIndex::from(n2));
+                            }
                             nodes.push(NodeIndex::from(n1));
                         } else if (n1 == nodes_e1.0) || (n1 == nodes_e1.1) {
                             nodes.push(NodeIndex::from(n1));
+                            if let Some(n2) = self.edge_data[*e].child_middle_node {
+                                nodes.push(NodeIndex::from(n2));
+                            }
                             nodes.push(NodeIndex::from(n0));
                         } else {
                             panic!("node not found!");
@@ -596,9 +918,12 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                         continue;
                     }
 
+                    if let Some(n2) = self.edge_data[*e].child_middle_node {
+                        nodes.push(NodeIndex::from(n2));
+                    }
+
                     if !nodes.contains(&NodeIndex::from(n0)) {
                         nodes.push(NodeIndex::from(n0));
-    
                     }
                     if !nodes.contains(&NodeIndex::from(n1)) {
                         nodes.push(NodeIndex::from(n1));
@@ -610,7 +935,6 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                 old_to_new_face_id[f] = Some(mesh.n_total_faces() - 1);
             }
         }
-
 
         // now add the cells
         for c in 0..self.cell_data.len() {

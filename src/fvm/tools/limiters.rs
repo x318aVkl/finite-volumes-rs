@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign, Mul};
 
-use crate::{Field, Mesh, Vector, fvm::schemes::{facengrad::FaceNormalGradientScheme, limiters::LimiterScheme}, prelude::{FaceNeighbor, FaceRef, geometry}};
+use crate::{Field, Mesh, Vector, fvm::schemes::{faceinterp::FaceInterpolationScheme, facengrad::FaceNormalGradientScheme, limiters::LimiterScheme}, prelude::{FaceNeighbor, FaceRef, geometry}};
 
 
 
@@ -44,12 +44,12 @@ impl<const N: usize, const DIM: usize> LimiterFrom<DIM> for Vector<N> {
     }
 }
 
-pub fn compute_limiters<'a, V, G, FngLhs, FngRhs, BndLhs, const DIM: usize>(
+pub fn compute_limiters<'a, V, G, FngLhs, FngRhs, FigLhs, BndLhs, const DIM: usize>(
     limiters: &mut Field<f64, geometry::Face, DIM>,
     values: &Field<V, geometry::Cell, DIM>,
     gradients: &Field<G, geometry::Cell, DIM>,
-    flux: &Field<f64, geometry::Face, DIM>,
     limiter_scheme: impl LimiterScheme,
+    fgradinterp_scheme: impl FaceInterpolationScheme<DIM, Lhs = FigLhs, Rhs = G>,
     fngrad_scheme: impl FaceNormalGradientScheme<DIM, Lhs = FngLhs, Rhs = FngRhs>,
     boundary_condition: impl Fn(&FaceRef<'a, DIM>) -> (BndLhs, V),
     mesh: &'a Mesh<DIM>,
@@ -57,7 +57,8 @@ pub fn compute_limiters<'a, V, G, FngLhs, FngRhs, BndLhs, const DIM: usize>(
 where
 V: LimiterFrom<DIM> + Default + Copy + AddAssign + AddAssign<FngRhs> + Add<V, Output = V>,
 FngLhs: Mul<V, Output = V>,
-G: Copy + Add<G, Output=G> + Mul<f64, Output = G> + Mul<Vector<DIM>, Output = V>,
+FigLhs: Default + Mul<G, Output = G>,
+G: Copy + Add<G, Output=G> + Mul<f64, Output = G> + Mul<Vector<DIM>, Output = V> + Default + AddAssign,
 BndLhs: Mul<V, Output = V>,
 {
 
@@ -66,14 +67,11 @@ BndLhs: Mul<V, Output = V>,
         let i = face.owner();
         let celli = mesh.cell(i);
 
-        let flux = flux[face.id()];
 
         match face.neighbor() {
             FaceNeighbor::Cell(j) => {
                 let cellj = mesh.cell(j);
                 let delta = cellj.center() - celli.center();
-
-                let u = if flux > 0.0 {i} else {j};
 
                 let (gi, gj, grhs) = fngrad_scheme.terms(&face, &mesh);
 
@@ -83,7 +81,12 @@ BndLhs: Mul<V, Output = V>,
 
                 fngrad += grhs;
 
-                let grad_face = gradients[u];
+                let (interp_i, interp_j, interp_rhs) = fgradinterp_scheme.terms(&face, &mesh);
+                let mut grad_face = interp_rhs;
+
+                grad_face += interp_i * gradients[i];
+                grad_face += interp_j * gradients[j];
+
                 let grad_face_delta = grad_face * delta;
 
                 let r = V::to_limiter_r(fngrad, grad_face_delta, delta);

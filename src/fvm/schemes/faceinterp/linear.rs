@@ -18,7 +18,7 @@ impl<'a, T, Lhs, const DIM: usize> Linear<T, Lhs, DIM> {
     }
 }
 
-impl<Lhs, const DIM: usize, T> FaceInterpolationScheme<DIM> for Linear<Lhs, T, DIM> where Lhs: Unit + Zero + Mul<f64, Output = Lhs>, T: Zero {
+impl<Lhs, const DIM: usize, T> FaceInterpolationScheme<DIM> for Linear<T, Lhs, DIM> where Lhs: Unit + Zero + Mul<f64, Output = Lhs>, T: Zero {
     type Lhs = Lhs;
     type Rhs = T;
 

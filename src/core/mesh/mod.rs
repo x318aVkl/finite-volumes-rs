@@ -233,6 +233,34 @@ pub struct Mesh<const DIM: usize> {
 }
 
 
+impl<const DIM: usize> Clone for Mesh<DIM> {
+    fn clone(&self) -> Self {
+        Self {
+            nodes: self.nodes.clone(),
+            face_nodes: self.face_nodes.clone(),
+            cell_faces: self.cell_faces.clone(),
+            cell_to_cell: self.cell_to_cell.clone(),
+            cell_face_gradient_coefficients: self.cell_face_gradient_coefficients.clone(),
+            cell_diag_gradient_coefficients: self.cell_diag_gradient_coefficients.clone(),
+            face_data: self.face_data.clone(),
+            cell_data: self.cell_data.clone(),
+            face_boundaries: self.face_boundaries.clone(),
+            n_local_faces: self.n_local_faces,
+            n_local_cells: self.n_local_cells,
+            computed: self.computed,
+            mpi_comm: match self.mpi_comm.as_ref() {
+                Some(c) => Some(c.duplicate()),
+                None => None,
+            },
+            patch_id_to_lid: self.patch_id_to_lid.clone(),
+            patch_name_ids: self.patch_name_ids.clone(),
+            patch_fstart_len: self.patch_fstart_len.clone(),
+            patch_name_id_map: self.patch_name_id_map.clone(),
+        }
+    }
+}
+
+
 impl<'a, const DIM: usize> NodeRef<'a, DIM> {
     pub fn id(&self) -> NodeIndex {
         self.id

@@ -246,6 +246,30 @@ impl<'a> SingleDataCommunicator<'a> {
         recv
     }
 
+    pub fn reduce_max<T: Equivalence + Default + Clone>(&self, value: T) -> T {
+        let mpi_comm = match &self.mpi_comm {
+            Some(v) => v,
+            None => return value,
+        };
+
+        let mut recv = T::default();
+        mpi_comm.all_reduce_into(&value, &mut recv, mpi::collective::SystemOperation::max());
+
+        recv
+    }
+
+    pub fn reduce_min<T: Equivalence + Default + Clone>(&self, value: T) -> T {
+        let mpi_comm = match &self.mpi_comm {
+            Some(v) => v,
+            None => return value,
+        };
+
+        let mut recv = T::default();
+        mpi_comm.all_reduce_into(&value, &mut recv, mpi::collective::SystemOperation::min());
+
+        recv
+    }
+
     pub fn barrier(&self) {
         match &self.mpi_comm {
             Some(v) => v.barrier(),
