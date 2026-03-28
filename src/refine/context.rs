@@ -1,4 +1,8 @@
-use crate::{Field, Mesh, prelude::{CellRef, geometry}, refine::mesh::RefinementMesh};
+use std::collections::HashMap;
+
+use mpi::traits::Equivalence;
+
+use crate::{Field, Mesh, prelude::{CellIndex, CellRef, geometry}, refine::mesh::RefinementMesh};
 
 
 
@@ -21,6 +25,8 @@ pub struct RefinementContext<const DIM: usize> {
 
     refined_mesh: RefinementMesh<DIM>,
 
+    previous_local_to_leaf: Vec<Option<usize>>,
+
 }
 
 
@@ -37,6 +43,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
             level: 0.9,
             refinement_order: vec![],
             refined_mesh: rmesh,
+            previous_local_to_leaf: vec![],
         } 
     }
 
@@ -58,6 +65,9 @@ impl<const DIM: usize> RefinementContext<DIM> {
 
     pub fn refine(&mut self) -> Mesh<DIM> {
 
+        // save the leaf to local map
+        self.previous_local_to_leaf = self.refined_mesh.get_local_to_leaf().clone();
+
         // compute the refinement order
         self.refined_mesh.compute_refinement_order(&mut self.refinement_order, self.refinement_criteria.raw_data(), self.level);
 
@@ -78,6 +88,48 @@ impl<const DIM: usize> RefinementContext<DIM> {
         } else {
             &self.base_mesh
         }
+    }
+
+
+    pub fn map_field<T>(&self, field: Field<T, geometry::Cell, DIM>) -> Field<T, geometry::Cell, DIM> 
+    where T: Default + Clone + Copy + Equivalence
+    {
+
+        let mut new_field = Field::from_mesh(match self.current_mesh.as_ref() {
+            Some(m) => m,
+            None => panic!("Trying to map field, but mesh has not been refined yet")
+        });
+
+        for new_leaf_id in 0..new_field.len() {
+            let new_local_id = *self.refined_mesh.get_leaf_to_local_map().get(&new_leaf_id).unwrap();
+
+            if new_local_id >= self.previous_local_to_leaf.len() {
+                // this cell was not in the previous mesh
+                // use its parent
+                let parent_local_id = self.refined_mesh.get_cell_parent_id(new_local_id).unwrap();
+                let parent_old_leaf_id = self.previous_local_to_leaf[parent_local_id].expect("parent cell was in the previous mesh");
+                new_field[CellIndex::from(new_leaf_id)] = field[CellIndex::from(parent_old_leaf_id)];
+            } else {
+                match self.previous_local_to_leaf[new_local_id] {
+                    Some(previous_leaf_id) => {
+                        // this cell was in the previous mesh
+                        // just copy its value
+                        new_field[CellIndex::from(new_leaf_id)] = field[CellIndex::from(previous_leaf_id)];
+                    },
+                    None => {
+                        // cell new id was not in the mesh
+                        // use the parent cell, assumes it is in the mesh
+                        let parent_local_id = self.refined_mesh.get_cell_parent_id(new_local_id).unwrap();
+                        let parent_old_leaf_id = self.previous_local_to_leaf[parent_local_id].expect("parent cell was in the previous mesh");
+                        new_field[CellIndex::from(new_leaf_id)] = field[CellIndex::from(parent_old_leaf_id)];
+                    }
+                }
+            }
+        }
+
+        new_field.update();
+
+        new_field
     }
 
 }

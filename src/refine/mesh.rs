@@ -165,7 +165,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
                 rmesh.cell_faces.push_to_major(f);
             }
             rmesh.cell_faces.close_major();
-            rmesh.cell_data.push(CellData { owner: c.ownership(), original_cell: Some(usize::from(c.id())), parent_cell: None, refined_cstart: None, refined_len: None, refinement_level: 0 });
+            rmesh.cell_data.push(CellData { owner: c.ownership(), original_cell: Some(usize::from(c.id())), parent_cell: None, refined_cstart: None, refined_len: None, refinement_level: 0, });
             let cid = usize::from(c.id());
             rmesh.cell_leaf_ids.push(Some(cid));
             rmesh.cell_leaf_to_local_id.insert(cid, cid);
@@ -191,6 +191,13 @@ impl<const DIM: usize> RefinementMesh<DIM> {
         rmesh
     }
 
+
+    pub fn get_leaf_to_local_map(&self) -> &HashMap<usize, usize> {
+        &self.cell_leaf_to_local_id
+    }
+    pub fn get_local_to_leaf(&self) -> &Vec<Option<usize>> {
+        &self.cell_leaf_ids
+    }
 
 
     pub fn compute_refinement_order(&self, order: &mut Vec<Option<(usize, super::context::RefCommand)>>, criteria: &[f64], level: f64) {
@@ -970,6 +977,18 @@ impl<const DIM: usize> RefinementMesh<DIM> {
         mesh.compute().unwrap();
 
         mesh
+    }
+
+}
+
+
+
+
+impl<const DIM: usize> RefinementMesh<DIM> {
+
+
+    pub fn get_cell_parent_id(&self, cell: usize) -> Option<usize> {
+        self.cell_data[cell].parent_cell
     }
 
 }

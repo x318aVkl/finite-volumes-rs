@@ -48,10 +48,11 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
             }
     };
 
+    let mut u = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+
     // adaptive mesh refinement loops
     for refinements in 0..20 {
 
-        let mut u = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
         let mut source = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
         let mut mu = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
         let mut phi = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
@@ -137,6 +138,8 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
             })
             .set_level(0.1)
             .refine();
+        
+        u = mesh_refinement.map_field(u);
 
         println!("Level {}, ncells = {}", refinements, mesh.n_cells());
         
