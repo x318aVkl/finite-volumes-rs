@@ -19,7 +19,7 @@ pub use dmatrix::DistributedMatrix;
 
 pub use preconditioners::Preconditioner;
 
-use crate::Matrix;
+use crate::{Matrix, Vector};
 
 
 
@@ -77,6 +77,16 @@ impl ApproximateCmp for f64 {
 }
 
 
+impl<const N: usize> Magnitude for Vector<N> {
+    type Output = f64;
+    fn magnitude(self) -> Self::Output {
+        let mut out = 0.0;
+        for i in 0..N {
+            out += self[i].powi(2);
+        }
+        out.sqrt()
+    }
+}
 
 
 
@@ -86,15 +96,9 @@ impl<const N: usize> Inverse for Matrix<N, N> {
     }
 }
 
-impl<const N: usize> SquareRoot for Matrix<N, N> {
-    fn square_root(self) -> Self {
-        todo!()
-    }
-}
-
-impl<const N: usize> AbsoluteValue for Matrix<N, N> {
+impl<const M: usize, const N: usize> AbsoluteValue for Matrix<M, N> {
     fn absolute_value(mut self) -> Self {
-        for i in 0..N {
+        for i in 0..M {
             for j in 0..N {
                 self[[i, j]] = self[[i, j]].abs();
             }
@@ -103,11 +107,11 @@ impl<const N: usize> AbsoluteValue for Matrix<N, N> {
     }
 }
 
-impl<const N: usize> Magnitude for Matrix<N, N> {
+impl<const M: usize, const N: usize> Magnitude for Matrix<M, N> {
     type Output = f64;
     fn magnitude(self) -> Self::Output {
         let mut out = 0.0;
-        for i in 0..N {
+        for i in 0..M {
             for j in 0..N {
                 out += self[[i, j]].powi(2);
             }
@@ -116,7 +120,7 @@ impl<const N: usize> Magnitude for Matrix<N, N> {
     }
 }
 
-impl<const N: usize> ApproximateCmp for Matrix<N, N> {
+impl<const M: usize, const N: usize> ApproximateCmp for Matrix<M, N> {
     fn cmp_approx(self, rhs: Self) -> bool {
         (self - rhs).magnitude() < 1e-13
     }

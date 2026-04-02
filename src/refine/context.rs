@@ -21,6 +21,8 @@ pub struct RefinementContext<const DIM: usize> {
     refinement_criteria: Field<f64, geometry::Cell, DIM>,
     level: f64,
 
+    max_refinement: usize,
+
     refinement_order: Vec<Option<(usize, RefCommand)>>,
 
     refined_mesh: RefinementMesh<DIM>,
@@ -41,6 +43,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
             current_mesh: None,
             refinement_criteria: refcrit,
             level: 0.9,
+            max_refinement: 1000,
             refinement_order: vec![],
             refined_mesh: rmesh,
             previous_local_to_leaf: vec![],
@@ -63,13 +66,18 @@ impl<const DIM: usize> RefinementContext<DIM> {
         self
     }
 
+    pub fn set_max_refinement(&mut self, refinement: usize) -> &mut Self {
+        self.max_refinement = refinement;
+        self
+    }
+
     pub fn refine(&mut self) -> Mesh<DIM> {
 
         // save the leaf to local map
         self.previous_local_to_leaf = self.refined_mesh.get_local_to_leaf().clone();
 
         // compute the refinement order
-        self.refined_mesh.compute_refinement_order(&mut self.refinement_order, self.refinement_criteria.raw_data(), self.level);
+        self.refined_mesh.compute_refinement_order(&mut self.refinement_order, self.refinement_criteria.raw_data(), self.level, self.max_refinement);
 
         // refine the refined mesh
         self.refined_mesh.refine(&self.refinement_order);

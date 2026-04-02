@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::{BufRead, SeekFrom, Write}};
+use std::{collections::{HashMap, HashSet}, io::{BufRead, SeekFrom, Write}};
 
 use mpi::topology::SimpleCommunicator;
 
@@ -368,6 +368,7 @@ impl<const DIM: usize> Mesh<DIM> {
 
         let mut face_unique_id: usize = 0;
         let mut face_unique_to_final_id = vec![];
+        let mut unique_boundaries: HashSet<u16> = HashSet::new();
         for e in elements {
 
             let (face_nodes_i, face_starts) = e.faces();
@@ -394,7 +395,8 @@ impl<const DIM: usize> Mesh<DIM> {
                         face_hash.insert(f_hash, id);
 
                         match bnd {
-                            Some(_) => {
+                            Some(bndid) => {
+                                unique_boundaries.insert(bndid);
                                 face_unique_to_final_id.push(bnd_face_nodes.major_len());
                                 for ni in fi {
                                     bnd_face_nodes.push_to_major(NodeIndex::from(*ni));
@@ -422,11 +424,36 @@ impl<const DIM: usize> Mesh<DIM> {
 
         // Add to the boundary face ids the number of no boundary faces, to put them at the end
         let n_nobnd_faces = face_nodes.major_len();
-        for i in 0..face_unique_to_final_id.len() {
-            if face_boundaries[i].is_some() {
-                face_unique_to_final_id[i] += n_nobnd_faces;
+        // for i in 0..face_unique_to_final_id.len() {
+        //     if face_boundaries[i].is_some() {
+        //         face_unique_to_final_id[i] += n_nobnd_faces;
+        //     }
+        // }
+        // now reorder the face unique to final id based on the boundary id, so that all boundaries are sequential
+        // also rebuilds the boundary face nodes
+        let mut new_bnd_face_nodes = Sparsity::new();
+        let mut runningfaceid = n_nobnd_faces;
+        let mut unique_boundaries: Vec<_> = unique_boundaries.into_iter().collect();
+        unique_boundaries.sort();
+        for bnd in unique_boundaries {
+            for i in 0..face_unique_to_final_id.len() {
+                if let Some(bndi) = face_boundaries[i] {
+                    if bndi == bnd {
+                        let old_bnd_id = face_unique_to_final_id[i];
+                        face_unique_to_final_id[i] = runningfaceid;
+                        runningfaceid += 1;
+                        
+                        for j in bnd_face_nodes.major_range(old_bnd_id) {
+                            new_bnd_face_nodes.push_to_major(*j);
+                        }
+                        new_bnd_face_nodes.close_major();
+                    }
+                }
             }
         }
+        let bnd_face_nodes = new_bnd_face_nodes;
+
+
         // add the nodes of the boundary faces to the face_nodes
         for i in 0..bnd_face_nodes.major_len() {
             for j in bnd_face_nodes.major_range(i) {

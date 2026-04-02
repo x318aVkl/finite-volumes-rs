@@ -200,7 +200,7 @@ impl<const DIM: usize> RefinementMesh<DIM> {
     }
 
 
-    pub fn compute_refinement_order(&self, order: &mut Vec<Option<(usize, super::context::RefCommand)>>, criteria: &[f64], level: f64) {
+    pub fn compute_refinement_order(&self, order: &mut Vec<Option<(usize, super::context::RefCommand)>>, criteria: &[f64], level: f64, max_refinement: usize) {
         order.resize(self.cell_data.len(), None);
 
         // first figure out which cells have to be refined due do the criteria
@@ -219,10 +219,12 @@ impl<const DIM: usize> RefinementMesh<DIM> {
             } else {
                 continue;
             };
+
+            let refinement_level = self.cell_data[c].refinement_level;
             
             let crit = criteria[leaf_id];
 
-            if crit > level {
+            if (crit > level) && (refinement_level < max_refinement) {
                 // refinement needed
                 order[c] = Some((0, RefCommand::Refine));
             }

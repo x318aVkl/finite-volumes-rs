@@ -347,6 +347,21 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
             InternalFaceNeighbor::None => panic!("face neighbor is none for face {}", self.id)
         }
     }
+    pub fn linear_factor(&self) -> f64 {
+        let c0 = self.mesh.cell(self.owner()).center();
+        let fc = self.center();
+        let n = self.normal();
+        match self.neighbor() {
+            FaceNeighbor::Cell(c1) => {
+                let c1 = self.mesh.cell(c1).center();
+
+                n.dot(c1 - fc) / (n.dot(c1 - c0))
+            },
+            FaceNeighbor::Boundary(_) => {
+                0.0
+            }
+        }
+    }
 }
 
 impl<'a, const DIM: usize> CellRef<'a, DIM> {
@@ -479,7 +494,7 @@ impl<const DIM: usize> Mesh<DIM> {
             global_id: match global_id {
                 Some(v) => v,
                 None => cid,
-            } 
+            }
         });
 
         // set the face owner or neighbor to be this cell

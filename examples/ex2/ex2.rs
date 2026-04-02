@@ -10,7 +10,7 @@ mod pressure;
 
 use std::collections::HashMap;
 
-use finite_volumes::{core::mesh::PatchIndex, prelude::*};
+use finite_volumes::{core::mesh::PatchIndex, prelude::*, refine::{context::RefinementContext, criteria::compute_hessian_criteria}};
 
 
 enum ProblemType {
@@ -96,6 +96,9 @@ fn ex2<const DIM: usize>(
 
     let mesh: Mesh<DIM> = Mesh::read(std::io::BufReader::new(std::fs::File::open(if world.size() == 1 {"examples/ex2/mesh.msh".to_string()} else {format!("examples/ex2/mesh_{}.msh", rank)}.as_str()).unwrap()), Some(world)).unwrap();
 
+    let mut refinement = RefinementContext::from_mesh(mesh);
+    let mut mesh = refinement.mesh().clone();
+
     // setup the boundary conditions
     let mut wall_velocity = Vector::zero();
     wall_velocity[0] = 1.0;
@@ -138,6 +141,7 @@ fn ex2<const DIM: usize>(
     // create a communicator
     let comm = Communicator::<geometry::Cell, _>::from_mesh(&mesh);
 
+    let mut refinement_step: usize = 0;
     // time iterations
     for time_iter in 1..=steps {
 
@@ -251,7 +255,52 @@ fn ex2<const DIM: usize>(
 
         if rank == 0 {println!();}
 
-        if residual < 1e-5 {break}
+        //if residual < 1e-6 {break}
+
+        let ref_freq = 
+            if refinement_step > 5 {10} 
+            else if refinement_step > 3 {25} 
+            else {100};
+        if (time_iter > 499) && (time_iter % ref_freq == 0) {
+
+            // write the solution at this level
+            PvtuWriter::new(&mesh)
+                .with("p", &pressure)
+                .with("U", &velocity)
+                .write(format!("examples/ex2/solution_level_{}.pvtu", refinement_step).as_str())
+                .unwrap();
+
+            // perform adaptive mesh refinement
+            let mut criteria = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+            compute_hessian_criteria(&mut criteria, &velocity_gradient, &velocity, &mesh);
+            mesh = refinement
+                .set_criteria(|cell| {
+                    criteria[cell.id()].powf(0.5)
+                })
+                .set_level(0.15)
+                .set_max_refinement(3)
+                .refine();
+            velocity = refinement.map_field(velocity);
+            velocity_gradient = refinement.map_field(velocity_gradient);
+            pressure = refinement.map_field(pressure);
+            pressure_gradient = refinement.map_field(pressure_gradient);
+            old_velocity = refinement.map_field(old_velocity);
+
+            hbya = refinement.map_field(hbya);
+            ainv = refinement.map_field(ainv);
+
+            hbyan_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+            ainv_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+            phi = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+
+            // estimate phi from velocity after refinement
+            // this phi might not be divergence free
+            momentum::estimate_phi(&mut phi, &velocity, &mesh, bcs.velocity());
+
+            println!("Refinement, new mesh size = {}", mesh.n_cells());
+
+            refinement_step += 1;
+        }
 
     }
 
@@ -259,7 +308,7 @@ fn ex2<const DIM: usize>(
     PvtuWriter::new(&mesh)
         .with("p", &pressure)
         .with("U", &velocity)
-        .write("examples/ex2/solution.pvtu")
+        .write("examples/ex2/solution_final.pvtu")
         .unwrap();
 
     Ok(())
@@ -284,11 +333,11 @@ fn main() -> Result<(), finite_volumes::error::Error> {
         }
     };
 
-    ex2::<2>(
+    ex2::<3>(
         problem,
         world,
-        1.0 / 2000.0,
-        0.025,
+        1.0 / 1000.0,
+        0.05,
         1000,
     )?;
 

@@ -141,3 +141,28 @@ pub fn compute_velocity_gradients<'a, const DIM: usize>(
     velocity_gradient.update();
 }
 
+
+pub fn estimate_phi<'a, const DIM: usize>(
+    phi: &mut Field<f64, geometry::Face, DIM>,
+    velocity: &Field<Vector<DIM>, geometry::Cell, DIM>,
+    mesh: &'a Mesh<DIM>,
+    velocity_bc: impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>)
+) {
+    for face in mesh.iter_faces() {
+        let cell0 = face.owner();
+        match face.neighbor() {
+            FaceNeighbor::Cell(cell1) => {
+                let w = face.linear_factor();
+                let u_face = velocity[cell0] * w + velocity[cell1] * (1.0 - w);
+                phi[face.id()] = u_face.dot(face.normal());
+            },
+            FaceNeighbor::Boundary(_) => {
+                let (blhs, bv) = velocity_bc(&face); 
+
+                let u_face = bv + blhs * velocity[cell0];
+                
+                phi[face.id()] = u_face.dot(face.normal());
+            },
+        }
+    }
+}

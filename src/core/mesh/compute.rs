@@ -176,7 +176,6 @@ impl<const DIM: usize> Mesh<DIM> {
                     None => {}
                 }
             }
-            
             if self.patch_fstart_len.len() > 1 {
                 for i in 0..(self.patch_fstart_len.len() - 1) {
                     self.patch_fstart_len[i].1 = self.patch_fstart_len[i+1].0 - self.patch_fstart_len[i].0;

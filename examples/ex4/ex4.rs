@@ -111,14 +111,11 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
         u.set_from(solution.data());
 
         let mut gradients = Field::from_mesh(&mesh);
-        let mut hessians = Field::from_mesh(&mesh);
-
         compute_gradients(&mut gradients, &u, get_bc(), &mesh);
-        compute_gradients(&mut hessians, &gradients, |face| {(1.0, Vector::zero())}, &mesh);
 
         finite_volumes::refine::criteria::compute_hessian_criteria(
             &mut refcriteria,
-            &hessians,
+            &gradients,
             &u,
             &mesh
         );
