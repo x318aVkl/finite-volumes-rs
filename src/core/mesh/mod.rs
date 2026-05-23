@@ -362,6 +362,10 @@ impl<'a, const DIM: usize> FaceRef<'a, DIM> {
             }
         }
     }
+    pub fn delta(&self) -> f64 {
+        let oc = self.mesh.cell(self.owner()).center();
+        (self.center() - oc).dot(self.normal())
+    }
 }
 
 impl<'a, const DIM: usize> CellRef<'a, DIM> {
