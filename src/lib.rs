@@ -3,7 +3,6 @@ pub mod linalg;
 pub mod fvm;
 pub mod refine;
 pub mod post;
-pub mod ode;
 
 pub use core::{
     mesh::Mesh,
