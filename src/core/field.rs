@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use mpi::traits::Equivalence;
 
-use crate::{core::{Mesh, communicator::Communicator, mesh::{BoundaryPatch, Geometry, MeshGet, PatchIndex}}, prelude::{FaceIndex, geometry}};
+use crate::{core::{Mesh, communicator::Communicator, mesh::{BoundaryPatch, Geometry, MeshGet, PatchIndex}, traits::FloatBuffered}, prelude::{FaceIndex, geometry}};
 
 
 
@@ -50,6 +50,10 @@ where T: Equivalence, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> 
             self.data[i] = data[i];
         }
         self.update();
+    }
+
+    pub fn communicator(&self) -> &Communicator<G, DIM> {
+        &self.comm
     }
 }
 

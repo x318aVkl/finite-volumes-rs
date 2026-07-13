@@ -25,6 +25,7 @@ pub mod traits {
         fn f64_buffer_size() -> usize;
         fn put_in_f64_buffer(&self, buffer: &mut [f64]);
         fn build_from_f64_buffer(buffer: &[f64]) -> Self;
+        fn put_single_in_f64_buffer(&mut self, local_id: usize, value: f64);
     }
 
     impl FloatBuffered for f64 {
@@ -38,6 +39,10 @@ pub mod traits {
         fn build_from_f64_buffer(buffer: &[f64]) -> Self {
             assert!(buffer.len() > 0);
             buffer[0]
+        }
+        fn put_single_in_f64_buffer(&mut self, local_id: usize, value: f64) {
+            assert_eq!(local_id, 0);
+            *self = value;
         }
     }
 

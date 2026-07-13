@@ -410,6 +410,10 @@ impl<const N: usize> FloatBuffered for Vector<N> {
         }
         out
     }
+    fn put_single_in_f64_buffer(&mut self, local_id: usize, value: f64) {
+        assert!(local_id < N);
+        self.data[local_id] = value;
+    }
 }
 
 

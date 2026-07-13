@@ -688,6 +688,13 @@ impl<const M: usize, const N: usize> FloatBuffered for Matrix<M, N> {
         }
         out
     }
+    fn put_single_in_f64_buffer(&mut self, local_id: usize, value: f64) {
+        assert!(local_id < (M*N));
+
+        let i = local_id / N;
+        let j = local_id % N;
+        self[[i, j]] = value;
+    }
 }
 impl<const M: usize, const N: usize> Into<Matrix<M, N>> for [[f64; N]; M] {
     fn into(self) -> Matrix<M, N> {

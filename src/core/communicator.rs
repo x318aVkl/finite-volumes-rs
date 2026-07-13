@@ -46,6 +46,21 @@ pub struct Communicator<G: Geometry<DIM>, const DIM: usize> {
 
 }
 
+impl<G: Geometry<DIM>, const DIM: usize> Communicator<G, DIM> {
+    pub fn rank(&self) -> usize {
+        match &self.mpi_comm {
+            Some(m) => m.rank() as usize,
+            None => 0,
+        }
+    }
+    pub fn size(&self) -> usize {
+        match &self.mpi_comm {
+            Some(m) => m.size() as usize,
+            None => 1,
+        }
+    }
+}
+
 impl<G: Geometry<DIM>, const DIM: usize> Clone for Communicator<G, DIM> {
     fn clone(&self) -> Self {
         Self {

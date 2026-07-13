@@ -11,7 +11,7 @@ use std::io::{BufWriter, Write};
 
 
 
-fn file_without_directory<'a>(filepath: &'a str) -> &'a str {
+pub(super) fn file_without_directory<'a>(filepath: &'a str) -> &'a str {
     let mut fpl = filepath.len() - 1;
     let chars = filepath.chars().collect::<Vec<_>>();
     while fpl > 0 {
@@ -388,7 +388,7 @@ impl<'a, const DIM: usize> PvtuWriter<'a, DIM> {
 }
 
 
-fn file_without_extension<'a>(filepath: &'a str) -> &'a str {
+pub(super) fn file_without_extension<'a>(filepath: &'a str) -> &'a str {
     let mut fpl = filepath.len() - 1;
     let chars = filepath.chars().collect::<Vec<_>>();
     while fpl > 0 {
