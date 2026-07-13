@@ -179,7 +179,9 @@ impl<const DIM: usize> Mesh<DIM> {
 
             assert!(self.patch_fstart_len.len() > 0);
             assert!(self.patch_name_ids.len() > 0);
-
+            for i in 0..self.patch_fstart_len.len() {
+                self.patch_fstart_len[i].0 = 0;
+            }
             for fid in 0..self.n_local_faces {
                 match self.face_boundaries[fid] {
                     Some(b) => {
@@ -192,6 +194,18 @@ impl<const DIM: usize> Mesh<DIM> {
                         }
                     },
                     None => {}
+                }
+            }
+            for i in (0..self.patch_fstart_len.len()).rev() {
+                if self.patch_fstart_len[i].0 == 0 {
+                    // no face was found in this part of the mesh for this patch
+                    if (i+1) == self.patch_fstart_len.len() {
+                        // set as end of patch faces
+                        self.patch_fstart_len[i].0 = self.face_data.len();
+                    } else {
+                        // set as the next one
+                        self.patch_fstart_len[i].0 = self.patch_fstart_len[i+1].0;
+                    }
                 }
             }
             if self.patch_fstart_len.len() > 1 {
