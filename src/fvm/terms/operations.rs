@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::{Add, Sub}};
+use std::{marker::PhantomData, ops::{Add, Neg, Sub}};
 
 use crate::{fvm::terms::{Term, TermWrapper}, prelude::Zero};
 
@@ -151,4 +151,50 @@ B: Term<DIM, Lhs = <A as Term<DIM>>::Lhs, Rhs = <A as Term<DIM>>::Rhs>,
     }
 }
 
+
+
+pub struct OpNeg<A> {
+    a: A,
+}
+
+
+
+impl<A, const DIM: usize> Term<DIM> for OpNeg<A> 
+where A: Term<DIM>, 
+<A as Term<DIM>>::Lhs: Neg<Output = <A as Term<DIM>>::Lhs>, 
+<A as Term<DIM>>::Rhs: Neg<Output = <A as Term<DIM>>::Rhs>
+{
+    type Lhs = <A as Term<DIM>>::Lhs;
+    type Rhs = <A as Term<DIM>>::Rhs;
+
+    fn cell_terms<'a>(&self, cell: &'a crate::prelude::CellRef<'a, DIM>, mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Rhs) {
+        let ta = self.a.cell_terms(cell, mesh);
+        (
+            - ta.0,
+            - ta.1,
+        )
+    }
+
+    fn face_terms<'a>(&self, face: &'a crate::prelude::FaceRef<'a, DIM>, mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
+        let ta = self.a.face_terms(face, mesh);
+        (
+            - ta.0,
+            - ta.1,
+            - ta.2,
+        )
+    }
+
+}
+
+impl<A, const DIM: usize> Neg for TermWrapper<A, DIM> 
+where A: Term<DIM>,
+<A as Term<DIM>>::Lhs: Neg<Output = <A as Term<DIM>>::Lhs>, 
+<A as Term<DIM>>::Rhs: Neg<Output = <A as Term<DIM>>::Rhs>
+{
+    type Output = TermWrapper<OpNeg<A>, DIM>;
+
+    fn neg(self) -> Self::Output {
+        TermWrapper::new(OpNeg {a: self.term})
+    }
+}
 

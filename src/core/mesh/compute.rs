@@ -128,14 +128,23 @@ impl<const DIM: usize> Mesh<DIM> {
 
             for c in 0..self.n_cells() {
                 let mut g = Matrix::<DIM, DIM>::new();
+                let cidx = CellIndex(c);
 
                 let xc = self.cell_data[c].center;
 
                 for k in self.cell_faces.major_start(c)..self.cell_faces.major_end(c) {
                     let f = self.cell_faces.flat_index(k);
-
-                    let dgc = self.face_data[usize::from(f)].center - xc;
-
+                    
+                    let dgc = match self.face_data[usize::from(f)].neighbor {
+                        InternalFaceNeighbor::Boundary(_b) => {
+                            self.face_data[usize::from(f)].center - xc
+                        },
+                        InternalFaceNeighbor::Cell(c1) => {
+                            let co = if c1 == cidx {self.face_data[usize::from(f)].owner_cell} else {c1};
+                            self.cell_data[usize::from(co)].center - xc
+                        },
+                        _ => panic!("InternalFaceNeighbor is none"),
+                    };
                     g += dgc.outer(dgc);
                 }
 
@@ -144,7 +153,16 @@ impl<const DIM: usize> Mesh<DIM> {
                 for k in self.cell_faces.major_start(c)..self.cell_faces.major_end(c) {
                     let f = self.cell_faces.flat_index(k);
 
-                    let dgc = self.face_data[usize::from(f)].center - xc;
+                    let dgc = match self.face_data[usize::from(f)].neighbor {
+                        InternalFaceNeighbor::Boundary(_b) => {
+                            self.face_data[usize::from(f)].center - xc
+                        },
+                        InternalFaceNeighbor::Cell(c1) => {
+                            let co = if c1 == cidx {self.face_data[usize::from(f)].owner_cell} else {c1};
+                            self.cell_data[usize::from(co)].center - xc
+                        },
+                        _ => panic!("InternalFaceNeighbor is none"),
+                    };
 
                     let gi = ginv * dgc;
 

@@ -27,6 +27,13 @@ impl<const N: usize, const DIM: usize> GradientFrom<DIM> for Vector<N> {
 
     fn mul_to_gradient(self, g: Vector<DIM>) -> Self::GradientType {
         self.outer(g)
+
+        // (ux uy uz) * (gx gy gz)
+        // (
+        //      ux*gx    ux*gy    ux*gz
+        //      uy*gx    uy*gy    uy*gz
+        //      uz*gx    uz*gy    uz*gz
+        // )
     }
 }
 
