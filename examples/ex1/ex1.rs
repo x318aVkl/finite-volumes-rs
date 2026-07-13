@@ -123,8 +123,7 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
             &rhs,
             &precond,
             &comm,
-            1e-8,
-            1000,
+            LinearSolverOptions::default(),
         ).unwrap();
 
         if rank == 0 {println!("iter {}, solved: {}", time_iter, result);}

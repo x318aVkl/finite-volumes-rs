@@ -102,8 +102,7 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
             &rhs,
             &precond,
             &comm,
-            1e-8,
-            1000,
+            LinearSolverOptions::default(),
         ).unwrap();
 
         println!("solved: {}", result);

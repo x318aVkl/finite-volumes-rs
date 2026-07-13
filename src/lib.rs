@@ -46,7 +46,10 @@ pub mod prelude {
             IncompleteCholesky,
             IncompleteLowerUpper,
         },
-        solvers,
+        solvers::{
+            self,
+            LinearSolverOptions,
+        },
     };
 
     pub use super::fvm::{

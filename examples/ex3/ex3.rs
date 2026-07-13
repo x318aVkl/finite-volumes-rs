@@ -117,8 +117,7 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
                 &rhs,
                 &precond,
                 &comm,
-                1e-8,
-                1000,
+                LinearSolverOptions::default(),
             ).unwrap();
 
             println!("iter {}, solved: {}", time_iter, result);

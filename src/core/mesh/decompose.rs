@@ -143,7 +143,7 @@ impl<const DIM: usize> Mesh<DIM> {
             let mut local_face_ids: Vec<Option<FaceIndex>> = vec![None; self.n_faces()];
             let mut max_face_id: usize = 0;
 
-            let mut bndfacestart = 0;
+            let mut bndfacestart = self.n_faces();
             for (rank, fid) in faces_to_add {
                 // add the face
                 let mut node_buffer = [NodeIndex(0); 64];
@@ -200,8 +200,6 @@ impl<const DIM: usize> Mesh<DIM> {
             for (name, id) in self.patch_name_ids.iter() {
                 partmesh.add_patch(id.0, name.as_str(), Some((FaceIndex(bndfacestart), 0)))?;
             }
-                
-
 
             partmesh.compute()?;
             

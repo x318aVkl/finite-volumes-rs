@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use mpi::traits::Equivalence;
 
-use crate::{core::{Communicator, mesh::Geometry}, error::Error, linalg::{DistributedMatrix, DistributedVector, Preconditioner}};
+use crate::{core::{Communicator, mesh::Geometry}, error::Error, linalg::{DistributedMatrix, DistributedVector, Preconditioner, solvers::LinearSolverOptions}};
 
 use super::LinearSolverInfo;
 
@@ -16,14 +16,16 @@ pub fn bi_conjugate_gradient_stab<'a, G: Geometry<DIM>, LHS, RHS, const DIM: usi
     rhs: &DistributedVector<RHS>,
     preconditioner: &impl Preconditioner<RHS>,
     comm: &'a Communicator<G, DIM>,
-    tolerance: f64,
-    max_iter: usize,
+    options: LinearSolverOptions,
 ) -> Result<LinearSolverInfo, Error> 
 where G::IndexType: From<usize>, crate::Mesh<DIM>: crate::core::mesh::MeshGet<'a, G::IndexType>,
     usize: From<G::IndexType>,
     RHS: Copy + Clone + Default + AddAssign + SubAssign + MulAssign<f64> + Mul<RHS, Output = f64> + Mul<f64, Output = RHS> + Add<RHS, Output=RHS> + Sub<RHS, Output=RHS> + Equivalence,
     LHS: Copy + Clone + Default  + std::ops::Mul<RHS, Output = RHS>
 {
+    let tolerance = options.absolute_tolerance;
+    let relative_tolerance = options.relative_tolerance;
+    let max_iter = options.max_iterations;
 
     let bnorm = comm.single().reduce_add(rhs.dot(&rhs)).sqrt();
 
@@ -102,7 +104,7 @@ where G::IndexType: From<usize>, crate::Mesh<DIM>: crate::core::mesh::MeshGet<'a
 
         // check h
         let s_dot_s_sqrt = comm.single().reduce_add(s.dot(&s)).sqrt() / bnorm;
-        if s_dot_s_sqrt < tolerance {
+        if (s_dot_s_sqrt < tolerance) || (s_dot_s_sqrt / initial_residual < relative_tolerance) {
             error = s_dot_s_sqrt;
             history.push(error);
 
@@ -135,7 +137,7 @@ where G::IndexType: From<usize>, crate::Mesh<DIM>: crate::core::mesh::MeshGet<'a
         comm.collect(solution.data_mut());
 
         let r_dot_r_sqrt = comm.single().reduce_add(r.dot(&r)).sqrt() / bnorm;
-        if r_dot_r_sqrt < tolerance {
+        if (r_dot_r_sqrt < tolerance) || (r_dot_r_sqrt / initial_residual < relative_tolerance) {
             error = r_dot_r_sqrt;
             history.push(error);
             iter += 1;

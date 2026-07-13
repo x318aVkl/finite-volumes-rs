@@ -201,9 +201,19 @@ fn ex2<const DIM: usize>(
                     &prhs, 
                     &precond, 
                     &comm, 
-                    1e-6, 
-                    if pcorr == (npcorr - 1) {1e-3} else {0.1},
-                    1000,
+                    if pcorr == (npcorr - 1) {
+                        LinearSolverOptions {
+                            relative_tolerance: 1e-8,
+                            absolute_tolerance: 1e-6,
+                            max_iterations: 1000,
+                        }
+                    } else {
+                        LinearSolverOptions {
+                            relative_tolerance: 1.0,
+                            absolute_tolerance: 0.1,
+                            max_iterations: 200,
+                        }
+                    },
                 ).unwrap();
                 pressure.set_from(solution.data());
                 if rank == 0 {println!("  solve pressure: {}", result);}

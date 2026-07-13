@@ -1,6 +1,6 @@
 use mpi::traits::Equivalence;
 
-use crate::{core::{Communicator, mesh::Geometry}, error::Error, linalg::{DistributedMatrix, DistributedVector, Preconditioner}};
+use crate::{core::{Communicator, mesh::Geometry}, error::Error, linalg::{DistributedMatrix, DistributedVector, Preconditioner, solvers::LinearSolverOptions}};
 
 use super::LinearSolverInfo;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
@@ -15,16 +15,16 @@ pub fn conjugate_gradient<'a, G: Geometry<DIM>, LHS, RHS, const DIM: usize>(
     rhs: &DistributedVector<RHS>,
     preconditioner: &impl Preconditioner<RHS>,
     comm: &'a Communicator<G, DIM>,
-    tolerance: f64,
-    relative_tolerance: f64,
-    max_iter: usize,
+    options: LinearSolverOptions,
 ) -> Result<LinearSolverInfo, Error> 
 where G::IndexType: From<usize>, crate::Mesh<DIM>: crate::core::mesh::MeshGet<'a, G::IndexType>,
     usize: From<G::IndexType>,
     RHS: Copy + Clone + Default + AddAssign + SubAssign + MulAssign<f64> + Mul<RHS, Output = f64> + Mul<f64, Output = RHS> + Add<RHS, Output=RHS> + Sub<RHS, Output=RHS> + Equivalence,
     LHS: Copy + Clone + Default + std::ops::Mul<RHS, Output = RHS>
 {
-
+    let tolerance = options.absolute_tolerance;
+    let relative_tolerance = options.relative_tolerance;
+    let max_iter = options.max_iterations;
 
     let bnorm = comm.single().reduce_add(rhs.dot(rhs)).sqrt();
 
