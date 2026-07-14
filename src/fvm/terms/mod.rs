@@ -7,12 +7,14 @@ pub mod laplacian;
 pub mod convection;
 pub mod time;
 pub mod source;
+pub mod divergence;
 
 
 pub use laplacian::laplacian;
 pub use convection::convection;
 pub use time::time;
 pub use source::{source, linear_source};
+pub use divergence::divergence;
 
 pub mod operations;
 
