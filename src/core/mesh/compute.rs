@@ -179,6 +179,7 @@ impl<const DIM: usize> Mesh<DIM> {
 
             assert!(self.patch_fstart_len.len() > 0);
             assert!(self.patch_name_ids.len() > 0);
+            
             for i in 0..self.patch_fstart_len.len() {
                 self.patch_fstart_len[i].0 = 0;
             }

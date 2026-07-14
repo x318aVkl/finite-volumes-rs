@@ -7,6 +7,7 @@
 
 */
 
+use finite_volumes::fvm::bcs::FaceConstraints;
 use finite_volumes::fvm::{self, schemes, terms};
 use finite_volumes::prelude::*;
 
@@ -54,15 +55,17 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
         .with(SchemeType::FaceInterpolation, "limited-linear");
 
 
-    fn boundary_condition() -> impl Fn(&FaceRef<'_, 2>) -> (Matrix<4, 4>, Vector<4>) {
-        |face| {
-        if face.center().y().abs() < 1e-10 {
-            (Matrix::zero(), [1.0, 0.0, 0.0, 1.0].into())
-        } else if face.center().x().abs() < 1e-10 {
-            (Matrix::zero(), [0.0, 1.0, 0.0, 1.0].into())
-        } else {
-            (Matrix::unit(), Vector::zero())
-        }}
+    let mut face_constraints = FaceConstraints::from_mesh(&mesh);
+    for patch in mesh.iter_patch() {
+        for face in patch.iter() {
+            face_constraints[face.id()] = if face.center().y().abs() < 1e-10 {
+                (Matrix::zero(), [1.0, 0.0, 0.0, 1.0].into())
+            } else if face.center().x().abs() < 1e-10 {
+                (Matrix::zero(), [0.0, 1.0, 0.0, 1.0].into())
+            } else {
+                (Matrix::unit(), Vector::zero())
+            };
+        }
     }
 
     for time_iter in 0..100 {
@@ -103,7 +106,7 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
                     &mu,
                     )
                 ,
-                boundary_condition(),    // zero value on all boundaries
+                face_constraints.as_bc(),    // zero value on all boundaries
                 &mesh,
             );
 
@@ -124,13 +127,17 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
 
             u.set_from(solution.data());
 
+            if result.initial_residual < 1e-5 {
+                break;
+            }
+
         }
 
         // update the gradients and limiters
         fvm::tools::gradients::compute_gradients(
             &mut u_grad, 
             &mut u, 
-            boundary_condition(), 
+            face_constraints.as_bc(), 
             &mesh
         );
 
@@ -138,10 +145,10 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
             &mut u_lim, 
             &u, 
             &u_grad, 
-            schemes::limiters::LimitedLinear(0.5),
-            schemes::faceinterp::Upwind::<_, f64, 2>::new(&phi),
+            schemes::limiters::LimitedLinear(1.0),
+            schemes::faceinterp::Linear::<_, f64, _>::new(),
             schemes::facengrad::Orthogonal::<_, f64>::new(), 
-            boundary_condition(), 
+            face_constraints.as_bc(), 
             &mesh
         );
 

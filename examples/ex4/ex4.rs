@@ -5,7 +5,7 @@
 
 */
 
-use finite_volumes::{fvm::{assembly::assemble, schemes, terms, tools::{gradients::compute_gradients, limiters::compute_limiters}}, prelude::*, refine::{context::RefinementContext, criteria}};
+use finite_volumes::{fvm::{assembly::assemble, bcs::FaceConstraints, schemes, terms, tools::{gradients::compute_gradients, limiters::compute_limiters}}, prelude::*, refine::{context::RefinementContext, criteria}};
 
 
 
@@ -33,20 +33,22 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
     velocity[1] = 1.0;
     let velocity = velocity;
 
-    let get_bc = || {
-        |face: &FaceRef<DIM>| {
-                if face.center().x().min(face.center().y()).min(face.center().z()).abs() < 1e-10 {
-                    // zero gradient
-                    (1.0, 0.0)
-                } else {
-                    // fixed value of zero
-                    let x = face.center().x() - 0.5;
-                    let t = (x*100.0).tanh();
-                    let fv = t;
-                    (0.0, 0.0)
-                }
-            }
-    };
+    let mut face_constraints = FaceConstraints::from_mesh(&mesh);
+    for patch in mesh.iter_patch() {
+        for face in patch.iter() {
+            face_constraints[face.id()] = 
+            if face.center().x().min(face.center().y()).min(face.center().z()).abs() < 1e-10 {
+                // zero gradient
+                (1.0, 0.0)
+            } else {
+                // fixed value of zero
+                let x = face.center().x() - 0.5;
+                let t = (x*100.0).tanh();
+                let fv = t;
+                (0.0, 0.0)
+            };
+        }
+    }
 
     let mut u = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
 
@@ -87,7 +89,7 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
                 //     &phi
                 // )
             ,
-            get_bc(),    // zero value on all boundaries
+            face_constraints.as_bc(),    // zero value on all boundaries
             &mesh,
         );
 
@@ -110,7 +112,7 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
         u.set_from(solution.data());
 
         let mut gradients = Field::from_mesh(&mesh);
-        compute_gradients(&mut gradients, &u, get_bc(), &mesh);
+        compute_gradients(&mut gradients, &u, face_constraints.as_bc(), &mesh);
 
         finite_volumes::refine::criteria::compute_hessian_criteria(
             &mut refcriteria,

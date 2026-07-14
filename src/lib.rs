@@ -58,8 +58,7 @@ pub mod prelude {
             DynamicSchemeSet,
             SchemeType,
         },
-        bcs::BoundaryCondition,
-        bcs::StandardBoundaryCondition,
+        bcs::FaceConstraints,
     };
 
     pub use super::core::mesh::geometry;

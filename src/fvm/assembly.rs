@@ -9,7 +9,7 @@ use std::fmt::Debug;
 
 
 pub fn assemble<'a, V, Lhs, Rhs, const DIM: usize>(
-    equation: impl Term<DIM, Lhs = Lhs, Rhs = Rhs> + 'a,
+    equation: impl Term<DIM, Lhs = Lhs, Rhs = Rhs>,
     boundary_condition: impl Fn(&FaceRef<DIM>) -> (Lhs, V),
     mesh: &'a Mesh<DIM>,
 ) -> (DistributedMatrix<Lhs>, DistributedVector<Rhs>) 

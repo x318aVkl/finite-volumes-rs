@@ -199,6 +199,10 @@ impl<const DIM: usize> Mesh<DIM> {
 
         }
 
+        // if patches are empty, add a default patch
+        if mesh.patch_fstart_len.len() == 0 {
+            mesh.add_patch(0, "default", None)?;
+        }
 
         mesh.compute()?;
 
