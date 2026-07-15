@@ -32,13 +32,13 @@ impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Divergence<'b, D, Lhs, Rhs
     type Rhs = D;
 
     fn face_terms<'a>(&self, face: &'a FaceRef<'a, DIM>, _mesh: &'a Mesh<DIM>) -> (Self::Lhs, Self::Lhs, Self::Rhs) {
-        let area = face.area();
+        //let area = face.area();
         let flux = self.flux[face.id()];
 
         (
             Lhs::zero(),
             Lhs::zero(),
-            flux * area
+            flux
         )
     }
 }
