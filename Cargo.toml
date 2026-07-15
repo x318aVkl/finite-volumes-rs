@@ -47,6 +47,10 @@ path = "examples/ex3/ex3.rs"
 name = "ex4"
 path = "examples/ex4/ex4.rs"
 
+[[example]]
+name = "ex5"
+path = "examples/ex5/ex5.rs"
+
 
 
 [[bin]]

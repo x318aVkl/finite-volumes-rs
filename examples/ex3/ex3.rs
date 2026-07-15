@@ -2,8 +2,7 @@
 
     Example 3
 
-    solve a convection-diffusion-reaction equation using the simplified
-    assembly functions part of the library with premade terms
+    solve a coupled convection-diffusion-reaction equation
 
 */
 
