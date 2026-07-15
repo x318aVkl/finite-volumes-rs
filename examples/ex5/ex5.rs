@@ -174,8 +174,8 @@ fn ex5<const DIM: usize>(
             );
 
             let mut solution = DistributedVector::from_data(pressure.raw_data());
-            let precond = preconditioners::IncompleteCholesky::from_matrix(&lhs, 1);
-            let result = solvers::conjugate_gradient(
+            let precond = preconditioners::IncompleteLowerUpper::from_matrix(&lhs, 1);
+            let result = solvers::bi_conjugate_gradient_stab(
                 &mut solution, 
                 &lhs, &rhs, &precond, 
                 &comm, 
@@ -290,10 +290,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         write_interval: 0.02,
         time_iterations: 1000,
         momentum_predictor: false,
-        pressure_correctors: 2,
+        pressure_correctors: 4,
         smagorinsky_cs: 0.18,
         pressure_linear_options: LinearSolverOptions { 
-            relative_tolerance: 1e-4, 
+            relative_tolerance: 1e-2, 
             absolute_tolerance: 1e-5, 
             max_iterations: 500,
         },
