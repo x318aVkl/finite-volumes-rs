@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, io::{BufRead, SeekFrom, Write}};
+use std::{collections::{HashMap, HashSet}, io::{BufRead, Read, SeekFrom, Write}};
 
 use mpi::topology::SimpleCommunicator;
 
@@ -65,8 +65,8 @@ impl<const DIM: usize> Mesh<DIM> {
         Ok(())
     }
 
-    pub fn read<T: BufRead>(reader: T, mpi_comm: Option<SimpleCommunicator>) -> Result<Self, Box<dyn std::error::Error>> {
-
+    pub fn read<T: Read>(source: T, mpi_comm: Option<SimpleCommunicator>) -> Result<Self, Box<dyn std::error::Error>> {
+        let reader = std::io::BufReader::new(source);
 
         let mut mesh = Mesh::new(mpi_comm);
 
@@ -225,7 +225,8 @@ impl<const DIM: usize> Mesh<DIM> {
 impl<const DIM: usize> Mesh<DIM> {
 
 
-    fn read_su2_nodes<R: std::io::BufRead>(mesh: &mut Mesh<DIM>, reader: &mut R) {
+    fn read_su2_nodes<R: std::io::Read>(mesh: &mut Mesh<DIM>, source: &mut R) {
+        let reader = std::io::BufReader::new(source);
 
         let mut node: usize = 0;
         let mut n_nodes: Option<usize> = None;

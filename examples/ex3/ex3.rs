@@ -18,7 +18,7 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
 
     let rank = world.rank();
 
-    let mesh: Mesh<2> = Mesh::read(std::io::BufReader::new(std::fs::File::open(if world.size() == 1 {"examples/ex3/mesh.msh".to_string()} else {format!("examples/ex3/mesh_{}.msh", rank)}.as_str()).unwrap()), Some(world)).unwrap();
+    let mesh: Mesh<2> = Mesh::read(std::fs::File::open(if world.size() == 1 {"examples/ex3/mesh.msh".to_string()} else {format!("examples/ex3/mesh_{}.msh", rank)}.as_str()).unwrap(), Some(world)).unwrap();
 
     let mut u = Field::<Vector<4>, geometry::Cell, _>::from_mesh(&mesh);
 

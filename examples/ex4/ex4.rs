@@ -12,7 +12,7 @@ use finite_volumes::{fvm::{assembly::assemble, bcs::FaceConstraints, schemes, te
 fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
 
     // create the mesh
-    let mesh: Mesh<DIM> = Mesh::read(std::io::BufReader::new(std::fs::File::open("examples/ex4/mesh.msh").unwrap()), None).unwrap();
+    let mesh: Mesh<DIM> = Mesh::read(std::fs::File::open("examples/ex4/mesh.msh").unwrap(), None).unwrap();
     let mut mesh_refinement = RefinementContext::from_mesh(mesh);
     let mut mesh = mesh_refinement.mesh().clone();
 

@@ -1,4 +1,4 @@
-use std::{io::BufRead, str::FromStr};
+use std::io::BufRead;
 
 use mpi::traits::Equivalence;
 

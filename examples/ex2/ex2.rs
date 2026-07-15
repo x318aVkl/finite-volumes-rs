@@ -94,7 +94,7 @@ fn ex2<const DIM: usize>(
     // create the mesh
     let rank = world.rank() as usize;
 
-    let mesh: Mesh<DIM> = Mesh::read(std::io::BufReader::new(std::fs::File::open(if world.size() == 1 {"examples/ex2/mesh.msh".to_string()} else {format!("examples/ex2/mesh_{}.msh", rank)}.as_str()).unwrap()), Some(world)).unwrap();
+    let mesh: Mesh<DIM> = Mesh::read(std::fs::File::open(if world.size() == 1 {"examples/ex2/mesh.msh".to_string()} else {format!("examples/ex2/mesh_{}.msh", rank)}.as_str()).unwrap(), Some(world)).unwrap();
 
     let mut refinement = RefinementContext::from_mesh(mesh);
     let mut mesh = refinement.mesh().clone();

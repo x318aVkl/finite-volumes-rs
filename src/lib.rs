@@ -53,12 +53,15 @@ pub mod prelude {
     };
 
     pub use super::fvm::{
-        terms::Term,
+        terms::{self, Term},
         schemes::dynamic::{
             DynamicSchemeSet,
             SchemeType,
         },
+        schemes,
         bcs::FaceConstraints,
+        assembly,
+        tools,
     };
 
     pub use super::core::mesh::geometry;
