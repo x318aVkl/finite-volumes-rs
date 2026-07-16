@@ -7,6 +7,7 @@ pub mod euler;
 pub mod backward;
 
 pub use euler::Euler;
+pub use backward::Backward;
 
 pub trait TimeScheme<const DIM: usize> {
     type Lhs;

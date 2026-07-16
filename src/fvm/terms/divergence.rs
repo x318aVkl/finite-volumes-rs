@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ops::Mul};
+use std::{marker::PhantomData, ops::{Mul, Neg}};
 
 use crate::{Field, Mesh, fvm::terms::{Term, TermWrapper}, prelude::{FaceRef, Zero, geometry}};
 
@@ -21,13 +21,13 @@ impl<'a, D, Lhs, Rhs, const DIM: usize> Divergence<'a, D, Rhs, Lhs, DIM> {
 
 pub fn divergence<'a, D, Lhs, Rhs, const DIM: usize>(flux: &'a Field<D, geometry::Face, DIM>)
 -> TermWrapper<Divergence<'a, D, Lhs, Rhs, DIM>, DIM> 
-where D: Copy + Zero + Mul<f64, Output = D>, Lhs: Zero,
+where D: Copy + Zero + Mul<f64, Output = D> + Neg<Output = D>, Lhs: Zero,
 {
     TermWrapper { term: Divergence::new(flux) }
 }
 
 
-impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Divergence<'b, D, Lhs, Rhs, DIM> where D: Copy + Zero + Mul<f64, Output = D>, Lhs: Zero {
+impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Divergence<'b, D, Lhs, Rhs, DIM> where D: Copy + Zero + Mul<f64, Output = D> + Neg<Output = D>, Lhs: Zero {
     type Lhs = Lhs;
     type Rhs = D;
 
@@ -38,7 +38,7 @@ impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Divergence<'b, D, Lhs, Rhs
         (
             Lhs::zero(),
             Lhs::zero(),
-            flux
+            - flux
         )
     }
 }

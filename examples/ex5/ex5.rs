@@ -18,6 +18,32 @@ struct Parameters {
     smagorinsky_cs: f64,
 }
 
+
+fn noise<const DIM: usize>(x: Vector<DIM>, time: f64) -> f64 {
+    let mut rnd = 0.0;
+    let seeds = [2981.3, 90281.9, 1928.9, 817.9];
+    let factors = [0.7, 1.4, 0.78, 1.1];
+    let factors_time = [0.7, 1.4, 0.78, 1.1];
+    let ftime = 200.0;
+    for dim in 0..DIM {
+        let mut f = 10.0;
+        let mut a = 0.2;
+        for k in 0..factors.len() {
+            rnd += ((x[dim] * factors[k] + seeds[k] + factors_time[k] * time * ftime) * f).sin() * a;
+            f *= 2.0;
+            a *= 0.6;
+        }
+    }
+    rnd
+}
+fn noise_vec<const DIM: usize>(x: Vector<DIM>, time: f64) -> Vector<DIM> {
+    let mut out = Vector::new();
+    out[0] = noise(x, time);
+    out[1] = noise(x + Vector::one()*2.23, time + 17.3);
+    out[2] = noise(x + Vector::one()*5.1, time + 281.3);
+    out
+}
+
 fn ex5<const DIM: usize>(
     parameters: Parameters,
     world: MpiCommunicator,
@@ -36,12 +62,12 @@ fn ex5<const DIM: usize>(
     let mut phi = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
 
     // initialize cell fields
-    /*for cell in mesh.iter_cells() {
+    for cell in mesh.iter_cells() {
         let mut vi = Vector::<DIM>::zero();
         vi[0] = parameters.velocity;
         velocity[cell.id()] = vi;
     }
-    velocity.update();*/
+    velocity.update();
 
     let walls_bot = mesh.patch_id("walls_bot").unwrap();
     let walls_top = mesh.patch_id("walls_top").unwrap();
@@ -104,6 +130,7 @@ fn ex5<const DIM: usize>(
 
     let mut time = 0.0;
     let mut dt = parameters.time_step;
+    let mut dt_last: f64;
     let cfl = parameters.cfl;
 
     // hbya and ainv fields
@@ -118,9 +145,13 @@ fn ex5<const DIM: usize>(
     let mut write_iter = 0;
     let mut next_write_time = parameters.write_interval;
 
+    let mut velocity_last = velocity.clone();
+
     // time loop thingy
     for time_iter in 1..=parameters.time_iterations {
         if rank == 0 {println!("=== iter: {}, time: {:.6} ===", time_iter, time);}
+
+        dt_last = dt;
 
         // adjust the time step
         let mut time_to_write = false;
@@ -143,13 +174,14 @@ fn ex5<const DIM: usize>(
         if rank == 0 {println!("- dt: {:.6}", dt);}
     
         let (mlhs, mrhs) = assembly::assemble::<Vector<DIM>, f64, Vector<DIM>, DIM>(
-            terms::time(schemes::time::Euler::new(&velocity, dt))
+            terms::time(schemes::time::Backward::new(&velocity, &velocity_last, dt, dt_last))
                 + terms::convection(schemes::faceinterp::LimitedLinear::new(&phi, &velocity_lim), &phi)
-                - terms::laplacian(schemes::facengrad::Corrected::new(&velocity_grad, 1.0), &viscosity)
+                - terms::laplacian(schemes::facengrad::Orthogonal::new(), &viscosity)
             ,
             velocity_constraints.as_bc(),
             &mesh,
         );
+        velocity_last = velocity.clone();
 
         if parameters.momentum_predictor {
             // solve the momentum predictor
@@ -166,7 +198,7 @@ fn ex5<const DIM: usize>(
             );
 
             let (lhs, rhs) = assembly::assemble(
-                    - terms::laplacian(schemes::facengrad::Corrected::new(&pressure_grad, 1.0), &ainv_face)
+                    - terms::laplacian(schemes::facengrad::Orthogonal::new(), &ainv_face)
                     + terms::divergence::<f64, f64, f64, _>(&hbyan_face)
                 ,
                 pressure_constraints.as_bc(),
@@ -174,8 +206,8 @@ fn ex5<const DIM: usize>(
             );
 
             let mut solution = DistributedVector::from_data(pressure.raw_data());
-            let precond = preconditioners::IncompleteLowerUpper::from_matrix(&lhs, 1);
-            let result = solvers::bi_conjugate_gradient_stab(
+            let precond = preconditioners::IncompleteCholesky::from_matrix(&lhs, 0);
+            let result = solvers::conjugate_gradient(
                 &mut solution, 
                 &lhs, &rhs, &precond, 
                 &comm, 
@@ -201,8 +233,20 @@ fn ex5<const DIM: usize>(
                 &pressure_grad, 
                 &mesh
             );
+            // add sinusoidal noise to the velocity inlet
+            for face in mesh.patch(inlet).iter() {
+                let x = face.center();
+                let mut rnd = noise_vec(x, time);
+                rnd[0] += parameters.velocity;
+                velocity_constraints[face.id()] = (0.0, rnd);
+            }
             // also correct the velocity face constraints for slip boundary condition
             for face in mesh.patch(walls_top).iter() {
+                let n = face.normal();
+                let ucell = velocity[face.owner()];
+                velocity_constraints[face.id()] = (1.0, Vector::zero() - n * ucell.dot(n));
+            }
+            for face in mesh.patch(sides).iter() {
                 let n = face.normal();
                 let ucell = velocity[face.owner()];
                 velocity_constraints[face.id()] = (1.0, Vector::zero() - n * ucell.dot(n));
@@ -214,7 +258,7 @@ fn ex5<const DIM: usize>(
         correct_phi(
             &mut phi, 
             &hbyan_face, &ainv_face, &pressure, 
-            schemes::facengrad::Corrected::new(&pressure_grad, 1.0), 
+            schemes::facengrad::Orthogonal::new(), 
             pressure_constraints.as_bc(), 
             &mesh
         );
@@ -230,7 +274,7 @@ fn ex5<const DIM: usize>(
             &velocity_grad,
             schemes::limiters::LimitedLinear(1.0),
             schemes::faceinterp::Linear::new(),
-            schemes::facengrad::Corrected::new(&velocity_grad, 1.0),
+            schemes::facengrad::Orthogonal::new(),
             velocity_constraints.as_bc(),
             &mesh,
         );
@@ -238,7 +282,8 @@ fn ex5<const DIM: usize>(
         // done! now update the turbulent viscosity and overall viscosity
         for cell in mesh.iter_cells() {
             let u_grad = velocity_grad[cell.id()];
-            let s_norm = (2.0 * u_grad.sumsq()).sqrt();
+            let s_ij = 0.5 * (u_grad + u_grad.transpose());
+            let s_norm = (2.0 * s_ij.sumsq()).sqrt();
             let delta = cell.volume().powf(1.0 / (DIM as f64));
             let mu_t = (parameters.smagorinsky_cs * delta).powi(2) * s_norm;
             turbulent_viscosity[cell.id()] = mu_t;
@@ -284,22 +329,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let parameters = Parameters {
         laminar_viscoisty: 0.0001,
-        velocity: 2.0,
+        velocity: 3.0,
         time_step: 1e-4,
-        cfl: 0.5,
-        write_interval: 0.02,
-        time_iterations: 1000,
+        cfl: 0.8,
+        write_interval: 0.05,
+        time_iterations: 10000,
         momentum_predictor: false,
-        pressure_correctors: 4,
+        pressure_correctors: 5,
         smagorinsky_cs: 0.18,
         pressure_linear_options: LinearSolverOptions { 
-            relative_tolerance: 1e-2, 
+            relative_tolerance: 0.1, 
             absolute_tolerance: 1e-5, 
             max_iterations: 500,
         },
         pressure_linear_options_final: LinearSolverOptions { 
-            relative_tolerance: 1e-5, 
-            absolute_tolerance: 1e-6, 
+            relative_tolerance: 1e-3, 
+            absolute_tolerance: 1e-5, 
             max_iterations: 500,
         },
     };

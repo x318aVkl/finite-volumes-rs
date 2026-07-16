@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{marker::PhantomData, ops::Neg};
 
 use crate::{Field, fvm::terms::{Term, TermWrapper}, prelude::{Zero, geometry}};
 
@@ -21,20 +21,20 @@ impl<'a, V, Lhs, const DIM: usize> Source<'a, V, Lhs, DIM> {
 
 pub fn source<'a, V, Lhs, const DIM: usize>(source: &'a Field<V, geometry::Cell, DIM>) -> TermWrapper<Source<'a, V, Lhs, DIM>, DIM>
 where Lhs: Copy + Zero,
-V: Copy + Zero
+V: Copy + Zero + Neg<Output = V>
 {
     Source::new(source).wrap()
 }
 
 
-impl<'b, V, Lhs, const DIM: usize> Term<DIM> for Source<'b, V, Lhs, DIM> where V: Copy + Zero, Lhs: Zero {
+impl<'b, V, Lhs, const DIM: usize> Term<DIM> for Source<'b, V, Lhs, DIM> where V: Copy + Zero + Neg<Output = V>, Lhs: Zero {
     type Lhs = Lhs;
     type Rhs = V;
 
     fn cell_terms<'a>(&self, cell: &'a crate::prelude::CellRef<'a, DIM>, _mesh: &'a crate::Mesh<DIM>) -> (Self::Lhs, Self::Rhs) {
         (
             Self::Lhs::zero(),
-            self.source[cell.id()],
+            - self.source[cell.id()],
         )
     }
 
