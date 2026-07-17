@@ -2,7 +2,7 @@
     LES of flow past a backface
 */
 
-use finite_volumes::{fvm::{schemes::faceinterp::FaceInterpolationScheme, tools::{gradients::compute_gradients, hbya::{compute_hbya_ainv, correct_phi, correct_velocity, intepolate_hbya_ainv_faces}, limiters::compute_limiters}}, prelude::*};
+use finite_volumes::{fvm::{schemes::faceinterp::FaceInterpolationScheme, tools::{gradients::compute_gradients, hbya::{compute_hbya_ainv, correct_phi, correct_velocity, intepolate_hbya_ainv_faces}, limiters::compute_limiters, wall_distance::compute_wall_distance}}, prelude::*};
 
 struct Parameters {
     laminar_viscoisty: f64,
@@ -147,6 +147,20 @@ fn ex5<const DIM: usize>(
 
     let mut velocity_last = velocity.clone();
 
+    // compute the wall distance
+    let mut wall_dist = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    compute_wall_distance(
+        &mut wall_dist, 
+        &mesh,
+        None, 
+        100,
+        1e-3,
+        LinearSolverOptions::default(),
+    )?;
+    PvtuWriter::new(&mesh)
+        .with("wall_distance", &wall_dist)
+        .write("examples/ex5/data/wall_distance.pvtu")?;
+
     // time loop thingy
     for time_iter in 1..=parameters.time_iterations {
         if rank == 0 {println!("=== iter: {}, time: {:.6} ===", time_iter, time);}
@@ -285,7 +299,13 @@ fn ex5<const DIM: usize>(
             let s_ij = 0.5 * (u_grad + u_grad.transpose());
             let s_norm = (2.0 * s_ij.sumsq()).sqrt();
             let delta = cell.volume().powf(1.0 / (DIM as f64));
-            let mu_t = (parameters.smagorinsky_cs * delta).powi(2) * s_norm;
+            let d = wall_dist[cell.id()];
+
+            // compute wall distance damping factor
+            let y_plus = d * velocity[cell.id()].norm() / parameters.laminar_viscoisty;
+            let f = 1.0 - (- y_plus / 25.).exp();
+
+            let mu_t = (parameters.smagorinsky_cs * f * delta).powi(2) * s_norm;
             turbulent_viscosity[cell.id()] = mu_t;
         }
         turbulent_viscosity.update();
