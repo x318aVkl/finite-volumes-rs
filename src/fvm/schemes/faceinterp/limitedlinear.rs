@@ -31,7 +31,7 @@ impl<'b, Lhs, const DIM: usize, V> FaceInterpolationScheme<DIM> for LimitedLinea
         
         let flux = self.flux[face.id()];
 
-        let u = if flux > 0.0 {0} else {1};
+        let u = if flux >= 0.0 {0} else {1};
         let d = if u == 0 {1} else {0};
 
         let mut t = [0.0, 0.0];

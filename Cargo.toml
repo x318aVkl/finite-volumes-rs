@@ -21,7 +21,6 @@ serde = ["dep:serde"]
 [profile.dev.package."*"]
 opt-level = 3
 debug = true
-debug-assertions = false
 codegen-units = 256
 
 
@@ -51,6 +50,9 @@ path = "examples/ex4/ex4.rs"
 name = "ex5"
 path = "examples/ex5/ex5.rs"
 
+[[example]]
+name = "ex6"
+path = "examples/ex6/ex6.rs"
 
 
 [[bin]]

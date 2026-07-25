@@ -1,4 +1,4 @@
-use std::{ops::{Add, AddAssign, DivAssign, Mul, Sub}, process::Output};
+use std::ops::{Add, AddAssign, DivAssign, Mul, Sub};
 
 use mpi::traits::Equivalence;
 

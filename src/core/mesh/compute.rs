@@ -183,14 +183,19 @@ impl<const DIM: usize> Mesh<DIM> {
             for i in 0..self.patch_fstart_len.len() {
                 self.patch_fstart_len[i].0 = 0;
             }
-            for fid in 0..self.n_local_faces {
+            let mut max_owned_face = self.face_data.len();
+            for fid in 0..self.face_data.len() {
+                if !self.face_data[fid].ownership.owned() {
+                    max_owned_face = fid - 1;
+                    break;
+                }
                 match self.face_boundaries[fid] {
                     Some(b) => {
                         if currbndp.is_none() || (currbndp.unwrap() != b) {
                             // start of a new face block
                             currbndp = Some(b);
 
-                            let local_id = *self.patch_id_to_lid.get(&b).expect("contains patch id");
+                            let local_id: usize = *self.patch_id_to_lid.get(&b).expect("contains patch id");
                             self.patch_fstart_len[local_id].0 = fid;
                         }
                     },
@@ -202,7 +207,7 @@ impl<const DIM: usize> Mesh<DIM> {
                     // no face was found in this part of the mesh for this patch
                     if (i+1) == self.patch_fstart_len.len() {
                         // set as end of patch faces
-                        self.patch_fstart_len[i].0 = self.face_data.len();
+                        self.patch_fstart_len[i].0 = max_owned_face + 1;
                     } else {
                         // set as the next one
                         self.patch_fstart_len[i].0 = self.patch_fstart_len[i+1].0;
@@ -214,9 +219,8 @@ impl<const DIM: usize> Mesh<DIM> {
                     self.patch_fstart_len[i].1 = self.patch_fstart_len[i+1].0 - self.patch_fstart_len[i].0;
                 }
             }
-
             let i = self.patch_fstart_len.len() - 1;
-            self.patch_fstart_len[i].1 = self.n_local_faces - self.patch_fstart_len[i].0;
+            self.patch_fstart_len[i].1 = (max_owned_face + 1) - self.patch_fstart_len[i].0;
         }
 
         self.computed = true;

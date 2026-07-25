@@ -2,9 +2,9 @@ s = 0.1;
 Point(1) = {-1, 0, 0, s};
 Point(2) = {0, 0, 0, s};
 Point(3) = {0, -0.2, 0, s};
-Point(4) = {2, -0.2, 0, s};
-Point(5) = {2, 0, 0, s};
-Point(6) = {2, 0.4, 0, s};
+Point(4) = {3, -0.2, 0, s};
+Point(5) = {3, 0, 0, s};
+Point(6) = {3, 0.4, 0, s};
 Point(7) = {0, 0.4, 0, s};
 Point(8) = {-1, 0.4, 0, s};
 Line(1) = {1, 2};
@@ -25,10 +25,10 @@ Curve Loop(3) = {5, 6, -10, 9};
 Plane Surface(3) = {3};
 
 
-Transfinite Curve {8, 10, 5} = 60 Using Progression 1;
+Transfinite Curve {-8, 10, 5} = 40 Using Progression 1.03;
 Transfinite Curve {2, 4} = 30 Using Progression 1;
-Transfinite Curve {1, 7} = 75 Using Progression 1;
-Transfinite Curve {3, 9, 6} = 150 Using Progression 1;
+Transfinite Curve {1, 7} = 50 Using Progression 1;
+Transfinite Curve {3, 9, -6} = 180 Using Progression 1.002;
 
 
 Transfinite Surface {1};
@@ -36,7 +36,7 @@ Transfinite Surface {3};
 Transfinite Surface {2};
 Recombine Surface {1, 3, 2};
 Extrude {0, 0, 0.8} {
-  Surface{1}; Surface{3}; Surface{2}; Layers {80}; Recombine;
+  Surface{1}; Surface{3}; Surface{2}; Layers {60}; Recombine;
 }
 Physical Surface("inlet", 77) = {31};
 Physical Surface("outlet", 78) = {41, 71};

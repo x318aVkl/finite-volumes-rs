@@ -46,12 +46,14 @@ impl<'b, G, V, Lhs, const DIM: usize> FaceNormalGradientScheme<DIM> for Correcte
 
                 let g0 = self.gradients[i];
                 let g1 = self.gradients[j];
+
+                let w = (face.center() - celli.center()).dot(n) / d.dot(n);
             
-                let gf = (g0 + g1) * 0.5;
+                let gf = g0 * (1.0 - w) + g1 * w;
 
                 let explicit = gf * (n - c_corr * d);
 
-                (Lhs::unit() * ( -c_corr ), Lhs::unit() * c_corr, - explicit * self.corrector_reduction )
+                (Lhs::unit() * ( -c_corr ), Lhs::unit() * c_corr, explicit * self.corrector_reduction )
             },
             FaceNeighbor::Boundary(_) => {
                 let d = face.center() - celli.center();
@@ -60,7 +62,7 @@ impl<'b, G, V, Lhs, const DIM: usize> FaceNormalGradientScheme<DIM> for Correcte
 
                 let explicit = self.gradients[i] * (n - c_corr * d);
 
-                (Lhs::unit() * ( -c_corr ), Lhs::unit() * c_corr,  - explicit * self.corrector_reduction )
+                (Lhs::unit() * ( -c_corr ), Lhs::unit() * c_corr,  explicit * self.corrector_reduction )
             },
         }
     }

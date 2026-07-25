@@ -19,7 +19,7 @@ impl<const DIM: usize> LimiterFrom<DIM> for f64 {
         gradient_dot_delta: Self,
         delta: Vector<DIM>,
     ) -> f64 {
-        if fngrad.abs() > 1e-10 {
+        if fngrad.abs() > 1e-12 {
             (
                 2.0 * gradient_dot_delta / (delta.norm() * fngrad) - 1.0
             ).max(0.0)
@@ -34,7 +34,7 @@ impl<const N: usize, const DIM: usize> LimiterFrom<DIM> for Vector<N> {
         gradient_dot_delta: Self,
         delta: Vector<DIM>,
     ) -> f64 {
-        if fngrad.norm() > 1e-10 {
+        if fngrad.norm() > 1e-12 {
             (
                 2.0 * fngrad.dot(gradient_dot_delta) / (delta.norm() * fngrad.dot(fngrad)) - 1.0
             ).max(0.0)

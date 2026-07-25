@@ -142,7 +142,7 @@ impl DynamicSchemeSet {
     ) -> Box<dyn TimeScheme<DIM, Lhs=Lhs, Rhs=Rhs> + 'a> 
     where 
     Lhs: Unit + Mul<f64, Output = Lhs> + 'a,
-    Rhs: Div<f64, Output = Rhs> + Copy,
+    Rhs: Div<f64, Output = Rhs> + Mul<f64, Output = Rhs> + Copy,
     {
         let scheme = self.time.as_ref().expect("dynamic scheme set contains a time scheme");
 

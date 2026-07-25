@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::ops::{Mul, Neg};
 
 use crate::{Field, Mesh, fvm::{schemes::facengrad::FaceNormalGradientScheme, terms::{Term, TermWrapper}}, prelude::{FaceRef, Zero, geometry}};
 
@@ -22,13 +22,13 @@ pub fn laplacian<'a, D, Lhs, Rhs, const DIM: usize>(scheme: impl FaceNormalGradi
 -> TermWrapper<Laplacian<'a, D, Lhs, Rhs, DIM>, DIM> 
 where D: Mul<Lhs, Output = Lhs> + Mul<Rhs, Output = Rhs> + Copy,
 Lhs: Zero,
-Rhs: Zero
+Rhs: Zero + Neg<Output = Rhs>
 {
     TermWrapper { term: Laplacian::new(scheme, diffusivity) }
 }
 
 
-impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Laplacian<'b, D, Lhs, Rhs, DIM> where D: Mul<Lhs, Output = Lhs> + Mul<Rhs, Output = Rhs> + Copy, Lhs: Zero, Rhs: Zero {
+impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Laplacian<'b, D, Lhs, Rhs, DIM> where D: Mul<Lhs, Output = Lhs> + Mul<Rhs, Output = Rhs> + Copy, Lhs: Zero, Rhs: Zero + Neg<Output = Rhs> {
     type Lhs = Lhs;
     type Rhs = Rhs;
 
@@ -40,7 +40,7 @@ impl<'b, D, Lhs, Rhs, const DIM: usize> Term<DIM> for Laplacian<'b, D, Lhs, Rhs,
         (
             diff * lhs0,
             diff * lhs1,
-            diff * rhs
+            -(diff * rhs)
         )
     }
 }

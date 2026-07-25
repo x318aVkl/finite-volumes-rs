@@ -21,16 +21,17 @@ struct Parameters {
 
 fn noise<const DIM: usize>(x: Vector<DIM>, time: f64) -> f64 {
     let mut rnd = 0.0;
-    let seeds = [2981.3, 90281.9, 1928.9, 817.9];
-    let factors = [0.7, 1.4, 0.78, 1.1];
-    let factors_time = [0.7, 1.4, 0.78, 1.1];
-    let ftime = 200.0;
+    let seeds = [2981.3, 90281.9, 1928.9, 817.9, 9172., 917., 827., 126., 7812., 18927.];
+    let factors = [0.7, 1.4, 0.78, 1.1, 0.9, 1.1, 0.8, 0.92, 0.97, 1.13];
+    let factors_time = [0.7, 1.4, 0.78, 1.1, 0.9, 0.82, 1.14, 1.03, 0.98, 1.02];
+    let mut ftime = 50.0;
     for dim in 0..DIM {
         let mut f = 10.0;
         let mut a = 0.2;
         for k in 0..factors.len() {
-            rnd += ((x[dim] * factors[k] + seeds[k] + factors_time[k] * time * ftime) * f).sin() * a;
+            rnd += ((x[dim] * factors[k] + factors_time[k] * time * ftime) * f + seeds[k]).sin() * a;
             f *= 2.0;
+            ftime *= 1.3;
             a *= 0.6;
         }
     }
@@ -170,10 +171,17 @@ fn ex5<const DIM: usize>(
         // adjust the time step
         let mut time_to_write = false;
         let mut min_dt: f64 = 1e20;
-        for cell in mesh.iter_cells() {
-            let ucell = velocity[cell.id()].norm();
-            let dx = cell.volume().powf(1.0 / (DIM as f64));
-            let dti = cfl * dx / ucell.max(1e-15);
+        for face in mesh.iter_faces() {
+            let dx = match face.neighbor() {
+                FaceNeighbor::Boundary(_) => {
+                    (face.center() - mesh.cell(face.owner()).center()).dot(face.normal()).abs()
+                },
+                FaceNeighbor::Cell(c1) => {
+                    (mesh.cell(c1).center() - mesh.cell(face.owner()).center()).dot(face.normal()).abs()
+                }
+            };
+            let uface = phi[face.id()].abs();
+            let dti = cfl * dx / uface.max(1e-15);
             min_dt = min_dt.min(dti);
         }
         let min_dt = comm.single().reduce_min(min_dt);
@@ -328,10 +336,24 @@ fn ex5<const DIM: usize>(
 
         // now if time to write, write
         if time_to_write {
+            // compute q criterion
+            let mut q_criterion = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+
+            for cell in mesh.iter_cells() {
+                let u_grad = velocity_grad[cell.id()];
+                let sigma = 0.5 * (u_grad + u_grad.transpose());
+                let omega = 0.5 * (u_grad - u_grad.transpose());
+
+                let q = 0.5 * (omega.sumsq() - sigma.sumsq());
+                q_criterion[cell.id()] = q;
+            }
+            q_criterion.update();
+
             PvtuWriter::new(&mesh)
                 .with("U", &velocity)
                 .with("p", &pressure)
                 .with("mu_t", &turbulent_viscosity)
+                .with("Q", &q_criterion)
                 .write(format!("examples/ex5/data/solution_{}.pvtu", write_iter).as_str())?;
             write_iter += 1;
             next_write_time += parameters.write_interval;
@@ -355,7 +377,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         write_interval: 0.05,
         time_iterations: 10000,
         momentum_predictor: false,
-        pressure_correctors: 5,
+        pressure_correctors: 3,
         smagorinsky_cs: 0.18,
         pressure_linear_options: LinearSolverOptions { 
             relative_tolerance: 0.1, 

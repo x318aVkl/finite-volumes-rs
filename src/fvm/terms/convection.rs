@@ -1,4 +1,4 @@
-use std::ops::Mul;
+use std::ops::{Mul, Neg};
 
 use crate::{Field, Mesh, fvm::{schemes::faceinterp::FaceInterpolationScheme, terms::TermWrapper}, prelude::{FaceRef, Zero, geometry}};
 
@@ -22,14 +22,14 @@ impl<'a, Lhs, Rhs, const DIM: usize> Convection<'a, Lhs, Rhs, DIM> {
 
 
 pub fn convection<'a, Lhs, Rhs, const DIM: usize>(scheme: impl FaceInterpolationScheme<DIM, Lhs = Lhs, Rhs = Rhs> + 'a, flux: &'a Field<f64, geometry::Face, DIM>) -> TermWrapper<Convection<'a, Lhs, Rhs, DIM>, DIM> 
-where Lhs: Mul<f64, Output = Lhs> + Zero + Copy, Rhs: Mul<f64, Output = Rhs> + Zero + Copy
+where Lhs: Mul<f64, Output = Lhs> + Zero + Copy, Rhs: Mul<f64, Output = Rhs> + Neg<Output = Rhs> + Zero + Copy
 {
     TermWrapper { term: Convection::new(scheme, flux) }
 }
 
 
 
-impl<'b, Lhs, Rhs, const DIM: usize> Term<DIM> for Convection<'b, Lhs, Rhs, DIM> where Lhs: Mul<f64, Output = Lhs> + Zero, Rhs: Mul<f64, Output = Rhs> + Zero + Copy {
+impl<'b, Lhs, Rhs, const DIM: usize> Term<DIM> for Convection<'b, Lhs, Rhs, DIM> where Lhs: Mul<f64, Output = Lhs> + Zero, Rhs: Mul<f64, Output = Rhs> + Neg<Output = Rhs> + Zero + Copy {
     type Lhs = Lhs;
     type Rhs = Rhs;
 
@@ -39,7 +39,7 @@ impl<'b, Lhs, Rhs, const DIM: usize> Term<DIM> for Convection<'b, Lhs, Rhs, DIM>
         (
             l0 * flux,
             l1 * flux,
-            r * flux
+            - r * flux
         )
     }
 }

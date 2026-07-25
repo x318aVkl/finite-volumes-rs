@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use mpi::traits::Equivalence;
 
-use crate::{core::{Mesh, communicator::Communicator, mesh::{BoundaryPatch, Geometry, MeshGet, PatchIndex}, traits::FloatBuffered}, prelude::{FaceIndex, geometry}};
+use crate::{core::{Mesh, communicator::Communicator, mesh::{BoundaryPatch, Geometry, MeshGet, PatchIndex}}, prelude::{FaceIndex, geometry}};
 
 
 
