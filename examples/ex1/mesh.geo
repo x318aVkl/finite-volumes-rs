@@ -21,7 +21,7 @@ Physical Surface("internal") = {1};
 //Mesh.MeshSizeFromPoints = 1;
 
 
-Transfinite Curve{1, 2, 3, 4} = 41;
+Transfinite Curve{1, 2, 3, 4} = 121;
 Transfinite Surface{1};
 
 Recombine Surface{1};

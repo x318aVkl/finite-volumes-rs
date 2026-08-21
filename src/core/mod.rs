@@ -20,6 +20,7 @@ pub mod traits {
     use super::Matrix;
     use super::Vector;
 
+    pub use super::field::ToField;
 
     pub trait FloatBuffered {
         fn f64_buffer_size() -> usize;

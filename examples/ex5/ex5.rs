@@ -55,12 +55,12 @@ fn ex5<const DIM: usize>(
     let mesh: Mesh<DIM> = Mesh::read(std::fs::File::open(if world.size() == 1 {"examples/ex5/mesh.msh".to_string()} else {format!("examples/ex5/mesh_{}.msh", rank)}.as_str()).unwrap(), Some(world)).unwrap();
 
     // create the fields
-    let mut velocity = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut pressure = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut turbulent_viscosity = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut velocity = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut pressure = Field::<f64, geometry::Cell, DIM>::from(&mesh);
+    let mut turbulent_viscosity = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
-    let mut viscosity = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut phi = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut viscosity = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut phi = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
     // initialize cell fields
     for cell in mesh.iter_cells() {
@@ -97,14 +97,14 @@ fn ex5<const DIM: usize>(
     phi.update();
 
     // create the gradients fields
-    let mut velocity_grad = Field::<Matrix<DIM, DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut velocity_lim = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut velocity_grad = Field::<Matrix<DIM, DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut velocity_lim = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let mut pressure_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut pressure_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
 
     // initialize the boundary conditions
-    let mut velocity_constraints = FaceConstraints::<Vector<DIM>, f64>::from_mesh(&mesh);
-    let mut pressure_constraints = FaceConstraints::<f64, f64>::from_mesh(&mesh);
+    let mut velocity_constraints = FaceConstraints::<Vector<DIM>, f64>::from(&mesh);
+    let mut pressure_constraints = FaceConstraints::<f64, f64>::from(&mesh);
     
     for face in mesh.patch(inlet).iter() {
         let mut vi = Vector::zero();
@@ -135,13 +135,13 @@ fn ex5<const DIM: usize>(
     let cfl = parameters.cfl;
 
     // hbya and ainv fields
-    let mut hbya = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut ainv = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut hbya = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut ainv = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
-    let mut hbyan_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut ainv_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut hbyan_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut ainv_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let comm = Communicator::<geometry::Cell, DIM>::from_mesh(&mesh);
+    let comm = Communicator::<geometry::Cell, DIM>::from(&mesh);
 
     let mut write_iter = 0;
     let mut next_write_time = parameters.write_interval;
@@ -149,7 +149,7 @@ fn ex5<const DIM: usize>(
     let mut velocity_last = velocity.clone();
 
     // compute the wall distance
-    let mut wall_dist = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut wall_dist = Field::<f64, geometry::Cell, DIM>::from(&mesh);
     compute_wall_distance(
         &mut wall_dist, 
         &mesh,
@@ -337,7 +337,7 @@ fn ex5<const DIM: usize>(
         // now if time to write, write
         if time_to_write {
             // compute q criterion
-            let mut q_criterion = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+            let mut q_criterion = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
             for cell in mesh.iter_cells() {
                 let u_grad = velocity_grad[cell.id()];

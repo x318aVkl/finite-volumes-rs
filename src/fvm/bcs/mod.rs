@@ -9,8 +9,17 @@ pub struct FaceConstraints<T, Lhs> {
     face_start: usize,
 }
 
+
+impl<T, Lhs, const DIM: usize> From<&Mesh<DIM>> for FaceConstraints<T, Lhs> 
+where T: Default + Clone, Lhs: Default + Clone
+{
+    fn from(value: &Mesh<DIM>) -> Self {
+        Self::from_mesh(value)
+    }
+}
+
 impl<T, Lhs> FaceConstraints<T, Lhs> {
-    pub fn from_mesh<const DIM: usize>(mesh: &Mesh<DIM>) -> Self where T: Default + Clone, Lhs: Default + Clone {
+    fn from_mesh<const DIM: usize>(mesh: &Mesh<DIM>) -> Self where T: Default + Clone, Lhs: Default + Clone {
         let fs = mesh.iter_patch().nth(0).unwrap().face_start();
         let fs = usize::from(fs);
         let plast = mesh.iter_patch().last().unwrap();

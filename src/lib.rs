@@ -1,8 +1,10 @@
 pub mod core;
 pub mod linalg;
 pub mod fvm;
-pub mod refine;
 pub mod post;
+
+#[cfg(feature = "refine")]
+pub mod refine;
 
 pub use core::{
     mesh::Mesh,

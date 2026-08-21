@@ -19,12 +19,12 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
 
     let mesh: Mesh<2> = Mesh::read(std::fs::File::open(if world.size() == 1 {"examples/ex3/mesh.msh".to_string()} else {format!("examples/ex3/mesh_{}.msh", rank)}.as_str()).unwrap(), Some(world)).unwrap();
 
-    let mut u = Field::<Vector<4>, geometry::Cell, _>::from_mesh(&mesh);
+    let mut u = Field::<Vector<4>, geometry::Cell, _>::from(&mesh);
 
-    let mut mu = Field::<f64, geometry::Face, _>::from_mesh(&mesh);
-    let mut phi = Field::<f64, geometry::Face, 2>::from_mesh(&mesh);
+    let mut mu = Field::<f64, geometry::Face, _>::from(&mesh);
+    let mut phi = Field::<f64, geometry::Face, 2>::from(&mesh);
 
-    let mut coupled_source = Field::<Matrix<4, 4>, geometry::Cell, _>::from_mesh(&mesh);
+    let mut coupled_source = Field::<Matrix<4, 4>, geometry::Cell, _>::from(&mesh);
 
     for face in mesh.iter_faces() {
         mu[face.id()] = 0.005;
@@ -40,12 +40,12 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
     phi.update();
     coupled_source.update();
 
-    let mut u_grad = Field::<Matrix<4, 2>, geometry::Cell, _>::from_mesh(&mesh);
-    let mut u_lim = Field::<f64, geometry::Face, _>::from_mesh(&mesh);
+    let mut u_grad = Field::<Matrix<4, 2>, geometry::Cell, _>::from(&mesh);
+    let mut u_lim = Field::<f64, geometry::Face, _>::from(&mesh);
 
     let dt = 0.02;
 
-    let comm = Communicator::<geometry::Cell, _>::from_mesh(&mesh);
+    let comm = Communicator::<geometry::Cell, _>::from(&mesh);
 
 
     // setup the schemes dynamically
@@ -54,7 +54,7 @@ fn ex3(world: MpiCommunicator) -> Result<(), finite_volumes::error::Error> {
         .with(SchemeType::FaceInterpolation, "limited-linear");
 
 
-    let mut face_constraints = FaceConstraints::from_mesh(&mesh);
+    let mut face_constraints = FaceConstraints::from(&mesh);
     for patch in mesh.iter_patch() {
         for face in patch.iter() {
             face_constraints[face.id()] = if face.center().y().abs() < 1e-10 {

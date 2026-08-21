@@ -19,6 +19,7 @@ use super::Preconditioner;
 pub struct IncompleteCholesky<T> {
     l: DistributedMatrix<T>,    // lower triangular factors
     sp_t: Sparsity<usize>, // sparsity of the columns of l
+    inv_diag: Vec<T>, // 1 / diag, stored for speed
 }
 
 
@@ -92,6 +93,8 @@ impl<T> IncompleteCholesky<T> {
 
             let lkkinv = lkk.inverse();
 
+            self.inv_diag[k] = lkkinv;
+
             self.l[[k, k]] = lkk;
 
 
@@ -133,7 +136,7 @@ impl<T> IncompleteCholesky<T> {
     }
 
 
-    fn build(matrix: &DistributedMatrix<T>, level: usize) -> IncompleteCholesky<T> where T: Sub<T, Output = T> + ApproximateCmp + Copy + Default {
+    fn build(matrix: &DistributedMatrix<T>, level: usize) -> IncompleteCholesky<T> where T: Sub<T, Output = T> + ApproximateCmp + Copy + Inverse + Default {
         
         // ignore the parallel entries
         let matrix = matrix.square_block();
@@ -177,7 +180,11 @@ impl<T> IncompleteCholesky<T> {
             sp_t.close_major();
         }
 
-        IncompleteCholesky { l: DistributedMatrix::from_sparsity_and_values(sp, values), sp_t }
+        let l = DistributedMatrix::from_sparsity_and_values(sp, values);
+
+        let inv_diag = vec![T::default(); matrix.nrows()];
+
+        IncompleteCholesky { l, sp_t, inv_diag }
     }
 
 
@@ -207,7 +214,7 @@ impl<T, Rhs> Preconditioner<Rhs> for IncompleteCholesky<T> where T: Default + Co
                     si -= lij * solution[j];
                 }
             }
-            solution[i] = self.l[[i, i]].inverse() * si;
+            solution[i] = self.inv_diag[i] * si;
         }
 
         // solve lT * solution = solution'
@@ -219,7 +226,7 @@ impl<T, Rhs> Preconditioner<Rhs> for IncompleteCholesky<T> where T: Default + Co
                     si -= self.l.get(*j, i) * solution[*j];
                 }
             }
-            solution[i] = self.l[[i, i]].inverse() * si;
+            solution[i] = self.inv_diag[i] * si;
         }
 
     }

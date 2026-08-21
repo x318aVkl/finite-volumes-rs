@@ -37,25 +37,25 @@ fn ex6<const DIM: usize>(
     let hdim = if DIM == 2 {1} else {2};
 
     // create the fields
-    let mut velocity = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut pressure = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut velocity = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut pressure = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
-    let mut velocity_grad = Field::<Matrix<DIM, DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut velocity_lim = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut velocity_grad = Field::<Matrix<DIM, DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut velocity_lim = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let mut pressure_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut pressure_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
 
-    let mut alpha = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut alpha_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut alpha_lim = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut alpha_lim_comp = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut alpha = Field::<f64, geometry::Cell, DIM>::from(&mesh);
+    let mut alpha_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut alpha_lim = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut alpha_lim_comp = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let mut viscosity = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut phi = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut viscosity = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut phi = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let mut density = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut density_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut density_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut density = Field::<f64, geometry::Cell, DIM>::from(&mesh);
+    let mut density_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut density_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
 
     // initialize cell fields
     for cell in mesh.iter_cells() {
@@ -102,9 +102,9 @@ fn ex6<const DIM: usize>(
 
 
     // boundary conditions
-    let mut velocity_constraints = FaceConstraints::<Vector<DIM>, f64>::from_mesh(&mesh);
-    let mut pressure_constraints = FaceConstraints::<f64, f64>::from_mesh(&mesh);
-    let mut alpha_constraints = FaceConstraints::<f64, f64>::from_mesh(&mesh);
+    let mut velocity_constraints = FaceConstraints::<Vector<DIM>, f64>::from(&mesh);
+    let mut pressure_constraints = FaceConstraints::<f64, f64>::from(&mesh);
+    let mut alpha_constraints = FaceConstraints::<f64, f64>::from(&mesh);
     for face in mesh.patch(inlet).iter() {
         let mut vi = Vector::zero();
         vi[0] = parameters.velocity;
@@ -169,16 +169,16 @@ fn ex6<const DIM: usize>(
     let cfl = parameters.cfl;
 
     // hbya and ainv fields
-    let mut hbya = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
-    let mut ainv = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut hbya = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
+    let mut ainv = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
-    let mut hbyan_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut ainv_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut hbyan_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut ainv_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let mut rho_hbyan_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-    let mut rho_ainv_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut rho_hbyan_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
+    let mut rho_ainv_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-    let comm = Communicator::<geometry::Cell, DIM>::from_mesh(&mesh);
+    let comm = Communicator::<geometry::Cell, DIM>::from(&mesh);
 
     let mut velocity_last = velocity.clone();
     let mut velocity_last2 = velocity.clone();
@@ -187,7 +187,7 @@ fn ex6<const DIM: usize>(
     let mut density_last = density.clone();
     let mut density_last2 = density.clone();
 
-    let mut surface_tension_source = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut surface_tension_source = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
 
     // field for density_grad .dot (h)
     let mut rhorgh = density_grad.clone();
@@ -456,7 +456,7 @@ fn ex6<const DIM: usize>(
                 div_curvature[cell.id()] /= d;
             }
             div_curvature.update();
-            let mut div_curvature_face = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+            let mut div_curvature_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
             let interp = schemes::faceinterp::Linear::<f64, f64, DIM>::new();
             for face in mesh.iter_faces() {
                 let (t0, t1, _) = interp.terms(&face, &mesh);
@@ -466,7 +466,7 @@ fn ex6<const DIM: usize>(
                 };
             }
             div_curvature_face.update();
-            let mut kappa = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+            let mut kappa = Field::<f64, geometry::Cell, DIM>::from(&mesh);
             for face in mesh.iter_faces() {
                 kappa[face.owner()] += div_curvature_face[face.id()] * face.area();
                 match face.neighbor() {

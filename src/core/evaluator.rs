@@ -86,7 +86,7 @@ impl<'a, G: Geometry<DIM>, const DIM: usize> Evaluator<'a, G, DIM> where Mesh<DI
 
 
     pub fn update(&mut self, index: G::IndexType, mesh: &'a Mesh<DIM>) {
-        // recompute the nodeal values at that node
+        // recompute the nodal values at that node
         for i in 0..self.evaluators.len() {
             self.evaluators[i](
                 index.clone(),

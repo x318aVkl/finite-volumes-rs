@@ -13,25 +13,25 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
     // create the mesh
     let rank = world.rank() as usize;
 
-    let mesh: Mesh<2> = Mesh::read(std::fs::File::open(if world.size() == 1 {"examples/ex1/mesh.msh".to_string()} else {format!("examples/ex1/mesh_{}.msh", rank)}.as_str()).unwrap(), Some(world)).unwrap();
+    let mesh: Mesh<DIM> = Mesh::read(std::fs::File::open(if world.size() == 1 {"examples/ex1/mesh.msh".to_string()} else {format!("examples/ex1/mesh_{}.msh", rank)}.as_str()).unwrap(), Some(world)).unwrap();
 
     // compute and store the face flux for advection
-    let mut flux = Field::<f64, geometry::Face, _>::from_mesh(&mesh);
-    let mut diffusivity = Field::<f64, geometry::Face, _>::from_mesh(&mesh);
-    for face in mesh.iter_faces() {
-        let velocity: Vector<_> = [1.0, 1.0].into();
-        flux[face.id()] = face.normal().dot(velocity);
-        diffusivity[face.id()] = 0.005;
-    }
-    flux.update();
-    diffusivity.update();
+    let diffusivity: Field<f64, geometry::Face, DIM> = mesh.iter_faces().map(|_face| {
+        0.005
+    }).collect::<Vec<_>>().to_field(&mesh);
+
+    let flux: Field<f64, geometry::Face, DIM> = mesh.iter_faces().map(|face| {
+        let mut velocity = Vector::new();
+        velocity[0] = 1.0;
+        velocity.dot(face.normal())
+    }).collect::<Vec<_>>().to_field(&mesh);
 
     // solution field
-    let mut field = Field::<f64, geometry::Cell, _>::from_mesh(&mesh);
-    let mut gradients = Field::<Vector<2>, geometry::Cell, _>::from_mesh(&mesh);
-    let mut limiters = Field::<f64, geometry::Face, _>::from_mesh(&mesh);
+    let mut field = Field::<f64, geometry::Cell, _>::from(&mesh);
+    let mut gradients = Field::<Vector<DIM>, geometry::Cell, _>::from(&mesh);
+    let mut limiters = Field::<f64, geometry::Face, _>::from(&mesh);
 
-    let bc = |face: &FaceRef<2>| {
+    let bc = |face: &FaceRef<DIM>| {
         let flux = flux[face.id()];
         if flux < 0.0 {
             (0.0, 1.0)
@@ -42,26 +42,26 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
 
     let dt = 0.1;
 
-    for time_iter in 1..=100 {
+    for time_iter in 1..=10 {
 
         // assemble poisson equation with source term and solve
         {
             let (lhs, rhs) = assembly::assemble(
                 terms::time(schemes::time::Euler::new(&field, dt))
-                    + terms::convection(schemes::faceinterp::LimitedLinear::new(&flux, &limiters), &flux)
+                    //+ terms::convection(schemes::faceinterp::LimitedLinear::new(&flux, &limiters), &flux)
                     - terms::laplacian(schemes::facengrad::Corrected::new(&gradients, 1.0), &diffusivity)
                 ,
                 bc,
                 &mesh
             );
 
-            let comm = Communicator::<geometry::Cell, _>::from_mesh(&mesh);
+            let comm = Communicator::<geometry::Cell, _>::from(&mesh);
 
             // solve
             let mut solution = DistributedVector::from_data(field.raw_data());
 
-            let precond = IncompleteLowerUpper::from_matrix(&lhs, 1);
-            let result = solvers::bi_conjugate_gradient_stab(
+            let precond = IncompleteCholesky::from_matrix(&lhs, 1);
+            let result = solvers::conjugate_gradient(
                 &mut solution,
                 &lhs,
                 &rhs,
@@ -87,7 +87,7 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
             &mesh
         );
 
-        tools::limiters::compute_limiters::<f64, Vector<2>, f64, f64, f64, f64, _>(
+        tools::limiters::compute_limiters::<f64, Vector<DIM>, f64, f64, f64, f64, _>(
             &mut limiters, 
             &field, 
             &gradients, 

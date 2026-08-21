@@ -72,10 +72,19 @@ impl<G: Geometry<DIM>, const DIM: usize> Clone for Communicator<G, DIM> {
 }
 
 
+
+impl<'a, I, G: Geometry<DIM, IndexType = I>, const DIM: usize> From<&Mesh<DIM>> for Communicator<G, DIM>
+where Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
+    fn from(value: &Mesh<DIM>) -> Self {
+        Self::from_mesh(value)
+    }
+}
+
+
 impl<'a, I, G: Geometry<DIM, IndexType = I>, const DIM: usize> Communicator<G, DIM>
 where Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
 
-    pub fn from_mesh(mesh: &Mesh<DIM>) -> Self {
+    fn from_mesh(mesh: &Mesh<DIM>) -> Self {
 
         let comm = match mesh.communicator() {
             Some(v) => v.duplicate(),

@@ -5,7 +5,7 @@
 
 */
 
-use finite_volumes::{fvm::{assembly::assemble, bcs::FaceConstraints, schemes, terms, tools::{gradients::compute_gradients, limiters::compute_limiters}}, prelude::*, refine::{context::RefinementContext, criteria}};
+use finite_volumes::{fvm::{assembly::assemble, bcs::FaceConstraints, schemes, terms, tools::{gradients::compute_gradients, limiters::compute_limiters}}, prelude::*};
 
 
 
@@ -13,8 +13,6 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
 
     // create the mesh
     let mesh: Mesh<DIM> = Mesh::read(std::fs::File::open("examples/ex4/mesh.msh").unwrap(), None).unwrap();
-    let mut mesh_refinement = RefinementContext::from_mesh(mesh);
-    let mut mesh = mesh_refinement.mesh().clone();
 
     //let point = Vector::unit() * 0.5;
 
@@ -33,7 +31,7 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
     velocity[1] = 1.0;
     let velocity = velocity;
 
-    let mut face_constraints = FaceConstraints::from_mesh(&mesh);
+    let mut face_constraints = FaceConstraints::from(&mesh);
     for patch in mesh.iter_patch() {
         for face in patch.iter() {
             face_constraints[face.id()] = 
@@ -50,16 +48,16 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
         }
     }
 
-    let mut u = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut u = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
     // adaptive mesh refinement loops
     for refinements in 0..20 {
 
-        let mut source = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
-        let mut mu = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
-        let mut phi = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+        let mut source = Field::<f64, geometry::Cell, DIM>::from(&mesh);
+        let mut mu = Field::<f64, geometry::Face, DIM>::from(&mesh);
+        let mut phi = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
-        let mut refcriteria = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+        let mut refcriteria = Field::<f64, geometry::Cell, DIM>::from(&mesh);
 
         for cell in mesh.iter_cells() {
             let r = cell.center().norm() / 0.5;
@@ -95,7 +93,7 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
 
         let mut solution = DistributedVector::from_data(u.raw_data());
 
-        let comm = Communicator::<geometry::Cell, _>::from_mesh(&mesh);
+        let comm = Communicator::<geometry::Cell, _>::from(&mesh);
 
         let precond = IncompleteLowerUpper::from_matrix(&lhs, 1);
         let result = solvers::bi_conjugate_gradient_stab(
@@ -111,15 +109,9 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
 
         u.set_from(solution.data());
 
-        let mut gradients = Field::from_mesh(&mesh);
+        let mut gradients = Field::from(&mesh);
         compute_gradients(&mut gradients, &u, face_constraints.as_bc(), &mesh);
 
-        finite_volumes::refine::criteria::compute_hessian_criteria(
-            &mut refcriteria,
-            &gradients,
-            &u,
-            &mesh
-        );
 
         // write the mesh
         PvtuWriter::new(&mesh)
@@ -128,27 +120,6 @@ fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
             .with("source", &source)
             .write(format!("examples/ex4/solution_{}.pvtu", refinements).as_str()).unwrap();
 
-        // refine the mesh
-        let old_ncells = mesh.n_cells();
-        mesh = mesh_refinement
-            .set_criteria(|cell| {
-                refcriteria[cell.id()]
-            })
-            .set_level(0.1)
-            .refine();
-        
-        u = mesh_refinement.map_field(u);
-
-        println!("Level {}, ncells = {}", refinements, mesh.n_cells());
-        
-        if mesh.n_cells() > 200_000 {
-            println!("Max number of cells reached, exiting");
-            break;
-        }
-        if mesh.n_cells() == old_ncells {
-            println!("Refinement has converged, exiting");
-            break;
-        }
     }
 
     Ok(())

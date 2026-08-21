@@ -28,15 +28,15 @@ pub fn compute_wall_distance<const DIM: usize>(
 
     // now, poisson equation solve
     let p = 3;
-    let mut distance_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from_mesh(& mesh);
-    let mut viscosity = Field::<f64, geometry::Face, DIM>::from_mesh(&mesh);
+    let mut distance_grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from(mesh);
+    let mut viscosity = Field::<f64, geometry::Face, DIM>::from(mesh);
     
     for face in mesh.iter_faces() {
         viscosity[face.id()] = 1.0;
     }
     viscosity.update();
 
-    let mut source = Field::<f64, geometry::Cell, DIM>::from_mesh(&mesh);
+    let mut source = Field::<f64, geometry::Cell, DIM>::from(mesh);
     for cell in mesh.iter_cells() {
         source[cell.id()] = - 1.0;
     }
@@ -53,7 +53,7 @@ pub fn compute_wall_distance<const DIM: usize>(
             None => (1.0, 0.0)
         }
     };
-    let comm = Communicator::<geometry::Cell, DIM>::from_mesh(&mesh);
+    let comm = Communicator::<geometry::Cell, DIM>::from(mesh);
     let rank = comm.rank();
 
     for iter in 1..=max_iterations {

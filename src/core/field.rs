@@ -17,13 +17,23 @@ pub struct Field<T, G: Geometry<DIM>, const DIM: usize> {
 
 
 
+impl<'a, I, T: Default + Clone, G: Geometry<DIM, IndexType = I>, const DIM: usize> From<&Mesh<DIM>> for Field<T, G, DIM>
+where T: Equivalence, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
+    fn from(value: &Mesh<DIM>) -> Self {
+        Self::from_mesh(value)
+    }
+}
+    
+
+
+
 impl<'a, I, T: Default + Clone, G: Geometry<DIM, IndexType = I>, const DIM: usize> Field<T, G, DIM>
 where T: Equivalence, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
-    pub fn from_mesh(mesh: &Mesh<DIM>) -> Self {
+    fn from_mesh(mesh: &Mesh<DIM>) -> Self {
         Field {
             data: vec![T::default(); G::global_size_from_mesh(mesh)],
             local_len: G::size_from_mesh(mesh),
-            comm: Communicator::from_mesh(&mesh),
+            comm: Communicator::from(mesh),
             _phantom: PhantomData,
         }
     }
@@ -251,4 +261,33 @@ impl<T, const DIM: usize> Field<T, geometry::Face, DIM> {
 
 }
 
+
+
+pub trait ToField<'a, T, G, const DIM: usize> where G: Geometry<DIM> {
+    fn to_field(self, mesh: &'a Mesh<DIM>) -> Field<T, G, DIM>;
+}
+
+
+impl<'a, T, G, const DIM: usize> ToField<'a, T, G, DIM> for Vec<T>
+where G: Geometry<DIM>,
+    T: Clone + Default + Equivalence,
+    <G as Geometry<DIM>>::IndexType: From<usize>,
+    usize: From<<G as Geometry<DIM>>::IndexType>,
+    Mesh<DIM>: MeshGet<'a, <G as Geometry<DIM>>::IndexType>
+{
+    fn to_field(self, mesh: &'a Mesh<DIM>) -> Field<T, G, DIM> 
+    {
+        if self.len() != G::global_size_from_mesh(mesh) {
+            panic!("Error, size mismatch in Vec<_>::to_field()");
+        }
+        let mut out = Field {
+            data: self,
+            local_len: G::size_from_mesh(mesh),
+            comm: Communicator::from(mesh),
+            _phantom: PhantomData,
+        };
+        out.update();
+        out
+    }
+}
 
