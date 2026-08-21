@@ -19,7 +19,8 @@ use super::Preconditioner;
 pub struct IncompleteCholesky<T> {
     l: DistributedMatrix<T>,    // lower triangular factors
     sp_t: Sparsity<usize>, // sparsity of the columns of l
-    inv_diag: Vec<T>, // 1 / diag, stored for speed
+    l_vt: Vec<T>,    // values of the transposed matrix
+    inv_diag: Vec<T>,   // inverse of diagonal, precomputed for speed
 }
 
 
@@ -30,21 +31,24 @@ impl<T> IncompleteCholesky<T> {
         &self.l
     }
 
-    pub fn row_i_sparsity(i: usize, matrix: &DistributedMatrix<T>, level: usize) -> BTreeSet<usize> {
-        let mut s = BTreeSet::new();
 
-        let mut q = vec![i];
-        let mut visited: HashMap<usize, usize> = HashMap::new();
+    fn row_i_sparsity_edit(s: &mut BTreeSet<usize>, q: &mut Vec<usize>, visited: &mut HashMap<usize, usize>, length: &mut HashMap<usize, usize>, i: usize, matrix: &DistributedMatrix<T>, level: usize) {
+        s.clear();
+
+        q.clear();
+        q.push(i);
+
+        visited.clear();
         visited.insert(i, i);
 
-        let mut length: HashMap<usize, usize> = HashMap::new();
+        length.clear();
         length.insert(i, 0);
 
         loop {
 
             let k = match q.pop() {
                 Some(v) => v,
-                None => break
+                None => break,
             };
             let lk = match length.get(&k) {
                 Some(v) => *v,
@@ -78,8 +82,6 @@ impl<T> IncompleteCholesky<T> {
             }
 
         }
-
-        s
     }
 
     fn compute(&mut self) where T: Default + Copy + Mul<T, Output = T> + SubAssign + Inverse + SquareRoot {
@@ -133,6 +135,13 @@ impl<T> IncompleteCholesky<T> {
 
         }
 
+        for row in 0..self.l.nrows() {
+            for (col, val) in self.l.iter_row(row) {
+                let k = self.sp_t.find_flat_index(col, row).unwrap();
+                self.l_vt[k] = val;
+            }
+        }
+
     }
 
 
@@ -143,14 +152,20 @@ impl<T> IncompleteCholesky<T> {
         
         assert!(matrix.is_symmetric());
 
-        let mut sp = Sparsity::new();
-        let mut sp_t = Sparsity::new();
-        let mut values = vec![];
+        let mut sp = Sparsity::with_capacity(matrix.nrows(), matrix.sparsity().minor_len());
+        let mut sp_t = Sparsity::with_capacity(matrix.nrows(), matrix.sparsity().minor_len());
+        let mut values = Vec::with_capacity(matrix.sparsity().minor_len());
+
+
+        let mut row_sp: BTreeSet<usize> = BTreeSet::new();
+        let mut visited: HashMap<usize, usize> = HashMap::new();
+        let mut length: HashMap<usize, usize> = HashMap::new();
+        let mut q: Vec<usize> = vec![];
 
         for i in 0..matrix.nrows() {
 
             // get this rows sparsity
-            let mut row_sp: BTreeSet<usize> = Self::row_i_sparsity(i, &matrix, level);
+            Self::row_i_sparsity_edit(&mut row_sp, &mut q, &mut visited, &mut length, i, &matrix, level);
 
             for (j, aij) in matrix.iter_row(i) {
 
@@ -166,7 +181,8 @@ impl<T> IncompleteCholesky<T> {
                 row_sp.remove(&j);
             }
             // add the extra row_sp entries as zeros
-            for j in row_sp {
+            for j in &row_sp {
+                let j = *j;
                 if j <= i {
                     sp.push_to_major(j);
                     values.push(T::default());
@@ -179,12 +195,10 @@ impl<T> IncompleteCholesky<T> {
             sp.close_major();
             sp_t.close_major();
         }
-
-        let l = DistributedMatrix::from_sparsity_and_values(sp, values);
-
         let inv_diag = vec![T::default(); matrix.nrows()];
+        let l_vt = vec![T::default(); values.len()];
 
-        IncompleteCholesky { l, sp_t, inv_diag }
+        IncompleteCholesky { l: DistributedMatrix::from_sparsity_and_values(sp, values), sp_t, l_vt, inv_diag }
     }
 
 
@@ -200,7 +214,7 @@ impl<T> IncompleteCholesky<T> {
 
 
 
-impl<T, Rhs> Preconditioner<Rhs> for IncompleteCholesky<T> where T: Default + Copy + Mul<Rhs, Output = Rhs> + Inverse, Rhs: SubAssign + Copy {
+impl<T, Rhs> Preconditioner<Rhs> for IncompleteCholesky<T> where T: Default + Copy + Mul<Rhs, Output = Rhs> + Inverse + std::fmt::Debug, Rhs: SubAssign + Copy {
     fn precondition<G: Geometry<DIM>, const DIM: usize>(&self, solution: &mut crate::linalg::DistributedVector<Rhs>, rhs: &crate::linalg::DistributedVector<Rhs>, _comm: &crate::core::Communicator<G, DIM>) {
         
         // solve  l*lT * solution = rhs
@@ -221,11 +235,19 @@ impl<T, Rhs> Preconditioner<Rhs> for IncompleteCholesky<T> where T: Default + Co
         for i in (0..self.l.nrows()).rev() {
             let mut si = solution[i];
 
-            for j in self.sp_t.major_range(i) {
-                if i != *j {
-                    si -= self.l.get(*j, i) * solution[*j];
+            for k in self.sp_t.major_start(i)..self.sp_t.major_end(i) {
+                let j = self.sp_t.flat_index(k);
+                if i != j {
+                    let lji = self.l_vt[k];
+                    si -= lji * solution[j];
                 }
             }
+
+            // for j in self.sp_t.major_range(i) {
+            //     if i != *j {
+            //         si -= self.l.get(*j, i) * solution[*j];
+            //     }
+            // }
             solution[i] = self.inv_diag[i] * si;
         }
 

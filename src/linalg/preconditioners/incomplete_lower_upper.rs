@@ -1,7 +1,6 @@
 
 use std::collections::BTreeSet;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::BTreeMap;
 use std::ops::Mul;
 use std::ops::SubAssign;
 
@@ -32,10 +31,10 @@ impl<T> IncompleteLowerUpper<T> {
         let mut s = BTreeSet::new();
 
         let mut q = vec![i];
-        let mut visited: HashMap<usize, usize> = HashMap::new();
+        let mut visited: BTreeMap<usize, usize> = BTreeMap::new();
         visited.insert(i, i);
 
-        let mut length: HashMap<usize, usize> = HashMap::new();
+        let mut length: BTreeMap<usize, usize> = BTreeMap::new();
         length.insert(i, 0);
 
         loop {
@@ -86,10 +85,10 @@ impl<T> IncompleteLowerUpper<T> {
         let mut s = BTreeSet::new();
 
         let mut q = vec![i];
-        let mut visited: HashMap<usize, usize> = HashMap::new();
+        let mut visited: BTreeMap<usize, usize> = BTreeMap::new();
         visited.insert(i, i);
 
-        let mut length: HashMap<usize, usize> = HashMap::new();
+        let mut length: BTreeMap<usize, usize> = BTreeMap::new();
         length.insert(i, 0);
 
         loop {
@@ -142,7 +141,7 @@ impl<T> IncompleteLowerUpper<T> {
     pub fn row_i_l_sparsity_m(i: usize, matrix: &DistributedMatrix<T>, level: usize) -> BTreeSet<usize> {
         let mut s = BTreeSet::new();
 
-        let mut visited: HashSet<usize> = HashSet::new();
+        let mut visited: BTreeSet<usize> = BTreeSet::new();
         visited.insert(i);
         s.insert(i);
 
@@ -171,7 +170,7 @@ impl<T> IncompleteLowerUpper<T> {
     pub fn row_i_u_sparsity_m(i: usize, matrix: &DistributedMatrix<T>, level: usize) -> BTreeSet<usize> {
         let mut s = BTreeSet::new();
 
-        let mut visited: HashSet<usize> = HashSet::new();
+        let mut visited: BTreeSet<usize> = BTreeSet::new();
         visited.insert(i);
         s.insert(i);
 
@@ -208,7 +207,7 @@ impl<T> IncompleteLowerUpper<T> {
         for i in 0..n {
             let l_row_sp = Self::row_i_l_sparsity(i, &matrix, level);
             let u_row_sp = Self::row_i_u_sparsity(i, &matrix, level);
-            let mut lu_sparsity: HashSet<usize> = HashSet::new();
+            let mut lu_sparsity: BTreeSet<usize> = BTreeSet::new();
             lu_sparsity.insert(i);
 
             let mut lu_row = SparseArray::new();
@@ -254,9 +253,9 @@ impl<T> IncompleteLowerUpper<T> {
             }
 
             // sparsify row
-            let mut retain = HashSet::new();
+            let mut retain = BTreeSet::new();
             retain.insert(i);
-            lu_row.sparsify(lu_row[i].magnitude() * 1e-6, retain);
+            lu_row.sparsify_btreeset(lu_row[i].magnitude() * 1e-6, retain);
 
             self.lu.push_row(lu_row);
         }

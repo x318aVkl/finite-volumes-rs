@@ -183,7 +183,7 @@ impl<const DIM: usize> Mesh<DIM> {
             for i in 0..self.patch_fstart_len.len() {
                 self.patch_fstart_len[i].0 = 0;
             }
-            let mut max_owned_face = self.face_data.len();
+            let mut max_owned_face = self.face_data.len() - 1;
             for fid in 0..self.face_data.len() {
                 if !self.face_data[fid].ownership.owned() {
                     max_owned_face = fid - 1;

@@ -17,6 +17,12 @@ impl<T: PartialOrd + Ord + Clone + Copy + std::ops::Add<Output = T> + From<usize
         Sparsity { minors: vec![], major_starts: vec![0], max_minor: 0.into(), }
     }
 
+    pub fn with_capacity(majors: usize, minors: usize,) -> Sparsity<T> {
+        let mut major_starts = Vec::with_capacity(majors);
+        major_starts.push(0);
+        Sparsity { minors: Vec::with_capacity(minors), major_starts: major_starts, max_minor: 0.into(), }
+    }
+
     /// Adds a minor index to the last major index's range
     pub fn push_to_major(&mut self, minor: T) {
         self.minors.push(minor);
@@ -93,6 +99,25 @@ impl<T: PartialOrd + Ord + Clone + Copy + std::ops::Add<Output = T> + From<usize
             }
         }
         false
+    }
+
+    pub fn find_flat_index(&self, major: usize, minor: T) -> Option<usize> {
+        let start = self.major_start(major);
+        let end = self.major_end(major);
+        for k in start..end {
+            if self.minors[k] == minor {
+                return Some(k);
+            }
+        }
+        None
+    }
+    pub fn find_flat_index_sorted(&self, major: usize, minor: T) -> Option<usize> {
+        let start = self.major_start(major);
+        let end = self.major_end(major);
+        match self.minors[start..end].binary_search(&minor) {
+            Ok(k) => Some(k),
+            Err(_) => None,
+        }
     }
 
     /// Sort each major range of the sparsity

@@ -1,5 +1,5 @@
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::linalg::Magnitude;
 
@@ -43,6 +43,9 @@ impl<T> SparseArray<T> {
 
 impl<T> SparseArray<T> where T: Magnitude<Output = f64> + Copy {
     pub fn sparsify(&mut self, tol: f64, retain: HashSet<usize>) {
+        self.data.retain(|i, v| if retain.contains(i) {true} else {v.magnitude() > tol});
+    }
+    pub fn sparsify_btreeset(&mut self, tol: f64, retain: BTreeSet<usize>) {
         self.data.retain(|i, v| if retain.contains(i) {true} else {v.magnitude() > tol});
     }
 }
