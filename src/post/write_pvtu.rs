@@ -249,6 +249,7 @@ fn write_polygons<const DIM: usize, W: Write>(
     mesh_data: &VtuMeshData<DIM>,
     writer: &mut BufWriter<W>
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let tol = 1e-10;
 
     writer.write("        <DataArray type=\"Int64\" Name=\"connectivity\" format=\"ascii\">\n".as_bytes())?;
     for c in 0..mesh_data.n_cells() {
@@ -272,7 +273,21 @@ fn write_polygons<const DIM: usize, W: Write>(
             if (ni0 == no0) || (ni0 == no1) {
                 cn.push(ni1);
             } else {
-                cn.push(ni0);
+                if (ni1 == no0) || (ni1 == no1) {
+                    cn.push(ni0);
+                } else {
+                    //attempt to do comparison with actual node positions
+                    let ni0p = mesh_data.nodes[ni0];
+
+                    let no0p = mesh_data.nodes[no0];
+                    let no1p = mesh_data.nodes[no1];
+
+                    if ((ni0p - no0p).norm() < tol) || ((ni0p - no1p).norm() < tol) {
+                        cn.push(ni1);
+                    } else {
+                        cn.push(ni0);
+                    }
+                }
             }
         }
 
@@ -284,8 +299,21 @@ fn write_polygons<const DIM: usize, W: Write>(
     writer.write("        </DataArray>\n".as_bytes())?;
 
     writer.write("        <DataArray type=\"Int64\" Name=\"offsets\" format=\"ascii\">\n".as_bytes())?;
+    // for c in 0..mesh_data.n_cells() {
+    //     write!(writer, "{} ", mesh_data.cell_nodes_starts[c+1])?;
+    // }
+    let mut offset = 0;
     for c in 0..mesh_data.n_cells() {
-        write!(writer, "{} ", mesh_data.cell_nodes_starts[c+1])?;
+
+        let cs = mesh_data.cell_faces_starts[c];
+        //let ce = mesh_data.cell_faces_starts[c+1];
+
+        let cfs = mesh_data.cell_faces[cs];
+        for _fi in 0..cfs {
+            offset += 1;
+        }
+
+        write!(writer, "{} ", offset)?;
     }
     write!(writer, "\n")?;
     writer.write("        </DataArray>\n".as_bytes())?;

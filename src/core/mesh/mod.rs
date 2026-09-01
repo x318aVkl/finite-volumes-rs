@@ -476,6 +476,13 @@ impl<const DIM: usize> Mesh<DIM> {
         })
     }
 
+    pub fn set_face_ownership(&mut self, face: usize, ownership: Ownership) {
+        self.face_data[face].ownership = ownership;
+    }
+    pub fn set_face_global_id(&mut self, face: usize, global_id: u32) {
+        self.face_data[face].global_id = global_id;
+    }
+
     pub fn add_cell(&mut self, faces: &[FaceIndex], ownership: Ownership, global_id: Option<u32>) {
         self.computed = false;
 
@@ -512,7 +519,7 @@ impl<const DIM: usize> Mesh<DIM> {
                         self.face_data[fi].neighbor = InternalFaceNeighbor::Cell(CellIndex(self.cell_data.len() - 1));
                     },
                     _ => {
-                        panic!("Error, trying to add another cell to a face with neighbor: {:?}, face {}", self.face_data[fi].neighbor, fi);
+                        //panic!("Error, trying to add another cell to a face with neighbor: {:?}, face {}", self.face_data[fi].neighbor, fi);
                     }
                 }
             }
@@ -744,7 +751,7 @@ impl<'a, const DIM: usize> Iterator for FaceIterator<'a, DIM> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.current >= self.mesh.n_total_faces() {
             None
-        } else if self.skip_remote && self.mesh.face(self.current.into()).fully_remote() {
+        } else if self.skip_remote && !self.mesh.face(self.current.into()).ownership().owned() {
             self.current += 1;
             self.next()
         } else {

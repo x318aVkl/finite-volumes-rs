@@ -1,4 +1,6 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::ops::Range;
 
@@ -123,29 +125,38 @@ where Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
             sizes_we_need.insert(*r, buff.len());
         }
 
+        let world_size = comm.size() as usize;
+
+        let default = 0;
+
         mpi::request::scope(|scope| {
 
             // send the sizes
-            //let requests: Vec<_> = send_global_ids.iter().map(|(rank, _global_ids)| {
-            //    comm.process_at_rank(*rank as i32).immediate_send_with_tag::<_, usize>(scope, sizes.get(rank).expect("contains rank"), 0)
-            //}).collect();
-            let requests: Vec<_> = sizes_we_need.iter().map(|(rank, size)| {
-                comm.process_at_rank(*rank as i32).immediate_send_with_tag::<_, usize>(scope, size, 0)
+            let requests: Vec<_> = (0..world_size).map(|rank| {
+                let size = sizes_we_need.get(&rank).unwrap_or(&default);
+                comm.process_at_rank(rank as i32).immediate_send_with_tag::<_, usize>(scope, size, 0)
             }).collect();
 
+            // let requests: Vec<_> = sizes_we_need.iter().map(|(rank, size)| {
+            //     comm.process_at_rank(*rank as i32).immediate_send_with_tag::<_, usize>(scope, size, 0)
+            // }).collect();
+
             // recieve the sizes and build the buffers
-            sizes_we_need.iter().map(|(rank, _)| {
-                let rank = *rank;
+            for rank in 0..world_size {
+                //let rank = *rank;
                 let mut slen = 0;
                 comm.process_at_rank(rank as i32).receive_into_with_tag::<usize>(&mut slen, 0);
                 if slen > 0 {
                     recv_global_ids.insert(rank, vec![0; slen]);
                 }
-            }).count();
-            // send_local_ids.iter().map(|(rank, _local_ids)| {
+            }
+            // sizes_we_need.iter().map(|(rank, _)| {
+            //     let rank = *rank;
             //     let mut slen = 0;
-            //     comm.process_at_rank(*rank as i32).receive_into_with_tag::<usize>(&mut slen, 0);
-            //     recv_global_ids.insert(*rank, vec![0; slen]);
+            //     comm.process_at_rank(rank as i32).receive_into_with_tag::<usize>(&mut slen, 0);
+            //     if slen > 0 {
+            //         recv_global_ids.insert(rank, vec![0; slen]);
+            //     }
             // }).count();
 
             // wait for the requests
@@ -159,7 +170,8 @@ where Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
             }).collect();
 
             // recieve them
-            send_global_ids.iter().map(|(rank, _)| {
+            let recv_ranks = recv_global_ids.iter().map(|(rank, _)| {*rank}).collect::<Vec<_>>();
+            recv_ranks.iter().map(|rank| {
                 let mut buffer = recv_global_ids.get_mut(rank).expect("recv global ids contains rank");
                 comm.process_at_rank(*rank as i32).receive_into_with_tag::<[usize]>(&mut buffer, 0);
             }).count();
@@ -185,12 +197,22 @@ where Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> {
                 *i = *global_to_local.get(i).expect("global to local contains node");
             }
         }
-            
 
-        let comms: Vec<OneRankCommunicator> = recv_local_ids.into_iter().map(|(rank, recv_local_ids)| {
-            let send_local_ids = send_local_ids.get(&rank).unwrap();
-            let recv_start = *send_local_ids.iter().min().unwrap();
-            let recv_end = *send_local_ids.iter().max().unwrap();
+        let mut all_required_ranks = BTreeSet::<usize>::new();
+        for (rank, _) in send_local_ids.iter() {
+            all_required_ranks.insert(*rank);
+        }
+        for (rank, _) in recv_local_ids.iter() {
+            all_required_ranks.insert(*rank);
+        }
+
+        let empty = Vec::new();
+        let comms: Vec<OneRankCommunicator> = all_required_ranks.into_iter().map(|rank| {
+            let recv_local_ids = recv_local_ids.get(&rank).unwrap_or(&empty);
+            let send_local_ids = send_local_ids.get(&rank).unwrap_or(&empty);
+            let recv_start = send_local_ids.iter().min().cloned().unwrap_or(0);
+            let recv_end = send_local_ids.iter().max().cloned().unwrap_or(usize::MAX);
+            let recv_end = if recv_end == usize::MAX {recv_start} else {recv_end};
             OneRankCommunicator { other_rank: rank, send_ids: recv_local_ids.clone(), recv_range: recv_start..(recv_end+1) }
         }).collect();
         

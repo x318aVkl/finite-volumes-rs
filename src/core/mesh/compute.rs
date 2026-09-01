@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 
-use crate::core::{Matrix, Mesh, Vector, error::Error, mesh::{CellData, CellIndex, FaceData, FaceIndex, InternalFaceNeighbor, NodeIndex}, vector::Normal};
+use mpi::traits::Communicator;
+
+use crate::core::{Matrix, Mesh, Vector, error::Error, mesh::{CellData, CellIndex, FaceData, FaceIndex, InternalFaceNeighbor, NodeIndex}, traits::Zero, vector::Normal};
 
 
 
@@ -14,7 +16,7 @@ impl<const DIM: usize> Mesh<DIM> {
         // validate that all faces have an owner cell
         for fi in 0..self.n_total_faces() {
             let fo = usize::from(self.face_data[fi].owner_cell);
-            assert!(fo < self.n_total_cells());
+            assert!(fo < self.n_total_cells(), "fo: {}, n_total_cells: {}, face {} / {}, usize::MAX: {}", fo, self.n_total_cells(), fi, self.n_total_faces(), usize::MAX);
         }
 
         // validate that all faces without face neighbors have non owned cells as owner
@@ -47,6 +49,7 @@ impl<const DIM: usize> Mesh<DIM> {
         // normals might be in the wrong direction, will be corrected later
 
         // compute the cell data
+        let mut thrust_ghost_data = true;
         {
             for c in 0..self.n_total_cells() {
                 let size = self.cell_faces.major_range(c).len();
@@ -58,6 +61,35 @@ impl<const DIM: usize> Mesh<DIM> {
                 center /= size as f64;
 
                 calc_cell_data(&self.face_data, self.cell_faces.major_range(c), center, &mut self.cell_data[c])?;
+
+                if c >= self.n_cells() {
+                    if (self.cell_data[c].volume < 1e-60) || self.cell_data[c].center[0].is_nan() {
+                        thrust_ghost_data = false;
+                    }
+                }
+            }
+        }
+
+
+        // if we should not thrust the ghost cell data, communicate centers and volumes
+        if !thrust_ghost_data {
+
+            let comm = crate::core::Communicator::<crate::core::mesh::geometry::Cell, DIM>::from(&*self);
+
+            let mut cell_centers = vec![Vector::zero(); self.n_total_cells()];
+            let mut cell_volumes = vec![0.; self.n_total_cells()];
+
+            for c in 0..self.n_cells() {
+                cell_centers[c] = self.cell_data[c].center;
+                cell_volumes[c] = self.cell_data[c].volume;
+            }
+
+            comm.collect(&mut cell_centers);
+            comm.collect(&mut cell_volumes);
+
+            for c in self.n_cells()..self.n_total_cells() {
+                self.cell_data[c].center = cell_centers[c];
+                self.cell_data[c].volume = cell_volumes[c];
             }
         }
 

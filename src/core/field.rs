@@ -275,10 +275,12 @@ where G: Geometry<DIM>,
     usize: From<<G as Geometry<DIM>>::IndexType>,
     Mesh<DIM>: MeshGet<'a, <G as Geometry<DIM>>::IndexType>
 {
-    fn to_field(self, mesh: &'a Mesh<DIM>) -> Field<T, G, DIM> 
+    fn to_field(mut self, mesh: &'a Mesh<DIM>) -> Field<T, G, DIM> 
     {
-        if self.len() != G::global_size_from_mesh(mesh) {
-            panic!("Error, size mismatch in Vec<_>::to_field()");
+        if self.len() == G::size_from_mesh(mesh) {
+            self.resize(G::global_size_from_mesh(mesh), T::default());
+        } else if self.len() != G::global_size_from_mesh(mesh) {
+            panic!("Error, size mismatch in Vec<_>::to_field(), got {}, expected {} or {}", self.len(), G::size_from_mesh(mesh), G::global_size_from_mesh(mesh));
         }
         let mut out = Field {
             data: self,

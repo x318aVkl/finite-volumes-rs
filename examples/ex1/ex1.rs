@@ -23,6 +23,7 @@ fn ex1<const DIM: usize>(world: MpiCommunicator) -> Result<(), finite_volumes::e
     let flux: Field<f64, geometry::Face, DIM> = mesh.iter_faces().map(|face| {
         let mut velocity = Vector::new();
         velocity[0] = 1.0;
+        velocity[1] = 1.0;
         velocity.dot(face.normal())
     }).collect::<Vec<_>>().to_field(&mesh);
 

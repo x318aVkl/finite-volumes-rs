@@ -382,7 +382,7 @@ impl<const N: usize> Matrix<N, N> {
     }
 
 
-        pub fn det(mut self) -> Result<f64, Error> {
+    pub fn det(mut self) -> Result<f64, Error> {
 
         // compute reduce row echelon form
         let mut p: [usize; N] = [0; N];

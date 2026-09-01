@@ -130,6 +130,15 @@ impl<const N: usize> Vector<N> {
         &mut self.data
     }
 
+    pub fn round(mut self, digits: u32) -> Self {
+        let f = 10_u32.pow(digits) as f64;
+        for i in 0..N {
+            let x = self.data[i];
+            self.data[i] = (x * f).round() / f;
+        }
+        self
+    }
+
 }
 
 
