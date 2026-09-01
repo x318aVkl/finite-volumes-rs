@@ -255,6 +255,9 @@ impl<const DIM: usize> Mesh<DIM> {
             self.patch_fstart_len[i].1 = (max_owned_face + 1) - self.patch_fstart_len[i].0;
         }
 
+        // adjust the number of non-local but not fully remote faces
+        self.n_non_fullyremote_faces = self.iter_faces().count();
+
         self.computed = true;
         Ok(())
     }

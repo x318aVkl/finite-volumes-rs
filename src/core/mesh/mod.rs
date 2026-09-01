@@ -218,6 +218,7 @@ pub struct Mesh<const DIM: usize> {
 
     n_local_faces: usize,
     n_local_cells: usize,
+    n_non_fullyremote_faces: usize,
 
     computed: bool,
 
@@ -247,6 +248,7 @@ impl<const DIM: usize> Clone for Mesh<DIM> {
             face_boundaries: self.face_boundaries.clone(),
             n_local_faces: self.n_local_faces,
             n_local_cells: self.n_local_cells,
+            n_non_fullyremote_faces: self.n_non_fullyremote_faces,
             computed: self.computed,
             mpi_comm: match self.mpi_comm.as_ref() {
                 Some(c) => Some(c.duplicate()),
@@ -429,6 +431,7 @@ impl<const DIM: usize> Mesh<DIM> {
             face_boundaries: vec![],
             n_local_faces: 0,
             n_local_cells: 0,
+            n_non_fullyremote_faces: 0,
             computed: false,
             mpi_comm,
             patch_id_to_lid: HashMap::new(),
@@ -536,6 +539,10 @@ impl<const DIM: usize> Mesh<DIM> {
 
     pub fn n_faces(&self) -> usize {
         self.n_local_faces
+    }
+
+    pub fn n_partially_local_faces(&self) -> usize {
+        self.n_non_fullyremote_faces
     }
 
     pub fn n_total_faces(&self) -> usize {
@@ -751,7 +758,11 @@ impl<'a, const DIM: usize> Iterator for FaceIterator<'a, DIM> {
     fn next(&mut self) -> Option<Self::Item> {
         if self.current >= self.mesh.n_total_faces() {
             None
-        } else if self.skip_remote && !self.mesh.face(self.current.into()).ownership().owned() {
+        //} else if self.skip_remote && !self.mesh.face(self.current.into()).ownership().owned() {
+        // actually, we need to iterate over some of the non-owned but non-fully remote faces
+        // this will lead to a number of faces iterated over greater than the number of local faces
+        // must be taken into account in the vec to field conversion
+        } else if self.skip_remote && self.mesh.face(self.current.into()).fully_remote() {
             self.current += 1;
             self.next()
         } else {

@@ -10,6 +10,8 @@ pub trait Geometry<const DIM: usize>  {
     fn size_from_mesh(mesh: &Mesh<DIM>) -> usize;
     fn global_size_from_mesh(mesh: &Mesh<DIM>) -> usize;
     fn get_from_mesh<'a>(mesh: &'a Mesh<DIM>, index: Self::IndexType) -> Self::ElementType<'a>; 
+
+    fn partially_owned_size_from_mesh(mesh: &Mesh<DIM>) -> usize;
 }
 
 
@@ -28,6 +30,9 @@ impl<const DIM: usize> Geometry<DIM> for Face {
     fn get_from_mesh<'a>(mesh: &'a Mesh<DIM>, index: Self::IndexType) -> Self::ElementType<'a> {
         mesh.get(index)
     }
+    fn partially_owned_size_from_mesh(mesh: &Mesh<DIM>) -> usize {
+        mesh.n_partially_local_faces()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -44,6 +49,9 @@ impl<const DIM: usize> Geometry<DIM> for Cell {
     }
     fn get_from_mesh<'a>(mesh: &'a Mesh<DIM>, index: Self::IndexType) -> Self::ElementType<'a> {
         mesh.get(index)
+    }
+    fn partially_owned_size_from_mesh(mesh: &Mesh<DIM>) -> usize {
+        mesh.n_cells()
     }
 }
 

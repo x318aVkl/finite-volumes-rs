@@ -279,6 +279,8 @@ where G: Geometry<DIM>,
     {
         if self.len() == G::size_from_mesh(mesh) {
             self.resize(G::global_size_from_mesh(mesh), T::default());
+        } else if self.len() == G::partially_owned_size_from_mesh(mesh) {
+            self.resize(G::global_size_from_mesh(mesh), T::default());
         } else if self.len() != G::global_size_from_mesh(mesh) {
             panic!("Error, size mismatch in Vec<_>::to_field(), got {}, expected {} or {}", self.len(), G::size_from_mesh(mesh), G::global_size_from_mesh(mesh));
         }

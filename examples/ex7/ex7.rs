@@ -20,20 +20,6 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
     println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
 
-    for cell in mesh.iter_cells() {
-        println!("cell faces = {:?}", cell.faces());
-        for face in cell.faces() {
-            let face = mesh.face(*face);
-
-            println!("    {:?}", face.nodes());
-            print!("    ");
-            for n in face.nodes() {
-                print!("{:?}", mesh.node(*n).position().round(2));
-            }
-            print!("\n");
-        }
-    }
-
     for level in 1..=2 {
         if world.rank() == 0 {
             println!("=== level {} ===", level);
@@ -59,21 +45,9 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
 
         mesh = refinement.mesh()?;
 
-        for face in mesh.iter_faces() {
-            let faces = face.nodes();
-            if world.rank() == 0 {println!("rank {} face {} nodes: {:?} center {:?}", world.rank(), face.id(), faces, face.center());}
-        }
-
         // total area
         let mut total_volume = 0.;
         for cell in mesh.iter_cells() {
-            if cell.volume().is_nan() {
-                let mut cf= vec![];
-                for f in cell.faces() {
-                    cf.push(mesh.face(*f).nodes().iter().map(|node| *node).collect::<Vec<_>>());
-                }
-                println!("cell faces: {:?}", cf);
-            }
             total_volume += cell.volume()
         }
 
