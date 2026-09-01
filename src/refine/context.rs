@@ -1,8 +1,8 @@
-use std::{collections::{HashMap, HashSet}, io::Read};
+use std::{collections::{HashMap, HashSet}, io::Read, sync::OnceLock};
 
-use mpi::{topology::SimpleCommunicator, traits::{Communicator, CommunicatorCollectives, Destination, Source}};
+use mpi::{topology::SimpleCommunicator, traits::{Buffer, Communicator, CommunicatorCollectives, Destination, Source}};
 
-use crate::{Mesh, Vector, core::{mesh::{FaceIndex, NodeIndex}, traits::Zero}};
+use crate::{Mesh, Vector, core::{mesh::{FaceIndex, NodeIndex}}};
 
 
 pub struct RefinementContext<const DIM: usize> {
@@ -11,8 +11,22 @@ pub struct RefinementContext<const DIM: usize> {
 }
 
 
+static INITIALIZED: OnceLock<bool> = OnceLock::new();
+
 pub fn initialize(world: &SimpleCommunicator) {
-    p4est::env::initialize(world);
+    INITIALIZED.get_or_init(|| {
+        p4est::env::initialize(world);
+        true
+    });
+
+}
+
+
+fn cell_gid_or<'a, T>(cell: &Option<p4est::grid::cell::Cell<'a, T>>, default: usize) -> usize {
+    match cell {
+        Some(c) => c.global_id,
+        None => default,
+    }
 }
 
 
@@ -20,6 +34,10 @@ pub fn initialize(world: &SimpleCommunicator) {
 impl<const DIM: usize> RefinementContext<DIM> {
     pub fn read<T: Read>(source: T, mpi_comm: SimpleCommunicator) -> Result<Self, crate::error::Error> {
         assert!(DIM == p4est::consts::DIM);
+
+        // initialize the library if not initialized already
+        initialize(&mpi_comm);
+
         let grid = p4est::grid::Grid::from_su2(source, mpi_comm.duplicate())?;
         Ok(Self {
             grid,
@@ -171,13 +189,13 @@ impl<const DIM: usize> RefinementContext<DIM> {
                 let c1 = face.cell1.as_ref().unwrap();
                 (None, c1.is_ghost, c1.owner_rank)
             };
-            let (owner_rank, ocgid) = if g1 && face.cell0.is_ghost {(face.cell0.owner_rank, face.cell0.global_id)} else {
+            let (owner_rank, ocgid, scgid) = if g1 && face.cell0.is_ghost {(face.cell0.owner_rank, face.cell0.global_id, cell_gid_or(&face.cell1, usize::MAX))} else {
                 let r0 = face.cell0.owner_rank;
                 //r0.min(r1)
                 if r0 <= r1 {
-                    (r0, face.cell0.global_id)
+                    (r0, face.cell0.global_id, cell_gid_or(&face.cell1, usize::MAX))
                 } else {
-                    (r1, face.cell1.as_ref().unwrap().global_id)
+                    (r1, face.cell1.as_ref().unwrap().global_id, face.cell0.global_id)
                 }
             };
             let owned = own_rank == owner_rank;
@@ -185,15 +203,22 @@ impl<const DIM: usize> RefinementContext<DIM> {
             if bnd.is_none() && owned {
 
                 let id = *faces_id_map.entry(face_hash).or_insert_with(|| {
-                    println!("fc = {:?}, face nodes = {:?}", fc, fnodes);
+                    //println!("fc = {:?}, face nodes = {:?}", fc, fnodes);
                     mesh.add_face(&fc, bnd, crate::core::mesh::Ownership::Owned, Some(current_global_id));
                     current_global_id += 1;
 
                     if owned && (face.cell0.is_ghost || if let Some(c1) = &face.cell1 {c1.is_ghost} else {false}) {
                         // owned cell but either c0 or c1 is remote
                         // this faces global id will have to be sent
+                        // we also need to send the face center
+                        let mut face_center = Vector::new();
+                        for n in &fc {
+                            let n = mesh.node(*n).position();
+                            face_center += n;
+                        }
+                        face_center /= fc.len() as f64;
                         let other_rank = if face.cell0.owner_rank == owner_rank {face.cell1.as_ref().unwrap().owner_rank} else {face.cell0.owner_rank};
-                        tosend_remote_faces.push((other_rank, ocgid, current_global_id - 1));
+                        tosend_remote_faces.push((other_rank, ocgid, scgid, current_global_id - 1, face_center));
                     }
 
                     mesh.n_faces() - 1
@@ -214,20 +239,24 @@ impl<const DIM: usize> RefinementContext<DIM> {
 
         // send the ordered remote faces global ids
         tosend_remote_faces.sort_by(|a, b| {
-            if a.0 == b.0 {a.1.cmp(&b.1)} else {a.0.cmp(&b.0)}
+            if a.0 == b.0 {if a.1 == b.1 {a.2.cmp(&b.2)} else {a.1.cmp(&b.1)}} else {a.0.cmp(&b.0)}
         });
 
 
         let mut tosend_remote_faces_ids_only = vec![];
-        for (_, _, id) in &tosend_remote_faces {
+        let mut tosend_remote_faces_centers_only = vec![];
+        for (_, _, _, id, fc) in &tosend_remote_faces {
             tosend_remote_faces_ids_only.push(*id);
+            tosend_remote_faces_centers_only.push(*fc);
         }
+
+        println!("rank {} sending faces {:?}", own_rank, tosend_remote_faces);
 
         let mut remote_face_ids = HashMap::<u32, Vec<usize>>::new();
         let mut ordered_ranks = vec![];
         {
             let mut other_ranks = HashSet::new();
-            for (i, _, _) in tosend_remote_faces.iter() {
+            for (i, _, _, _, _) in tosend_remote_faces.iter() {
                 other_ranks.insert(*i);
             }
 
@@ -276,7 +305,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
                     r.wait();
                 }
 
-                // send the actual values
+                // send the actual ids
                 let mut i = 0;
                 let reqs = (0..send_len_buffer.len()).map(|k| {
                     let fs = i;
@@ -356,7 +385,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
             let bnd = Some(bnd as u16);
 
             let id = *faces_id_map.entry(face_hash).or_insert_with(|| {
-                println!("fc = {:?}", fc);
+                //println!("fc = {:?}", fc);
                 mesh.add_face(&fc, bnd, crate::core::mesh::Ownership::Owned, Some(current_global_id));
                 current_global_id += 1;
                 mesh.n_faces() - 1
@@ -391,19 +420,19 @@ impl<const DIM: usize> RefinementContext<DIM> {
                 let c1 = face.cell1.as_ref().unwrap();
                 (None, c1.is_ghost, c1.owner_rank)
             };
-            let (owner_rank, ocgid) = if g1 && face.cell0.is_ghost {(own_rank, face.cell0.global_id)} else {
+            let (owner_rank, ocgid, scgid) = if g1 && face.cell0.is_ghost {(own_rank, face.cell0.global_id, cell_gid_or(&face.cell1, usize::MAX))} else {
                 let r0 = face.cell0.owner_rank;
                 //r0.min(r1)
                 if r0 <= r1 {
-                    (r0, face.cell0.global_id)
+                    (r0, face.cell0.global_id, cell_gid_or(&face.cell1, usize::MAX))
                 } else {
-                    (r1, face.cell1.as_ref().unwrap().global_id)
+                    (r1, face.cell1.as_ref().unwrap().global_id, face.cell0.global_id)
                 }
             };
             let owned = own_rank == owner_rank;
 
             if !owned {
-                remote_faces_data.push((owner_rank, ocgid, fc, bnd, face.cell0.local_id, if let Some(c1) = &face.cell1 {Some(c1.local_id)} else {None}, face.cell0.global_id, if let Some(c1) = &face.cell1 {Some(c1.global_id)} else {None}, face.cell0.owner_rank, if let Some(c1) = &face.cell1 {Some(c1.owner_rank)} else {None}));
+                remote_faces_data.push((owner_rank, ocgid, scgid, fc, bnd, face.cell0.local_id, if let Some(c1) = &face.cell1 {Some(c1.local_id)} else {None}, face.cell0.global_id, if let Some(c1) = &face.cell1 {Some(c1.global_id)} else {None}, face.cell0.owner_rank, if let Some(c1) = &face.cell1 {Some(c1.owner_rank)} else {None}));
             }
                 // let id = *faces_id_map.entry(face_hash).or_insert_with(|| {
                 //     mesh.add_face(&fc, bnd, crate::core::mesh::Ownership::Remote(owner_rank as usize), None);
@@ -420,17 +449,28 @@ impl<const DIM: usize> RefinementContext<DIM> {
 
         // sort the remote faces by owner rank, and then by owner side cell global id (both rank will agree on this order, this is necessary)
         remote_faces_data.sort_by(|a, b| {
-            if a.0 == b.0 {a.1.cmp(&b.1)} else {a.0.cmp(&b.0)}
+            if a.0 == b.0 {if a.1 == b.1 {a.2.cmp(&b.2)} else {a.1.cmp(&b.1)}} else {a.0.cmp(&b.0)}
         });
 
-        println!("rmfdata = {:?}", remote_faces_data);
+        let mut relevant_rmf_data = vec![];
+        for entry in remote_faces_data.iter() {
+            let mut fc = Vector::new();
+            for n in entry.3.iter() {
+                let n = mesh.node(*n).position();
+                fc += n;
+            }
+            fc /= entry.3.len() as f64;
+            relevant_rmf_data.push((entry.0, entry.1, entry.2, fc));
+        }
+
+        println!("rank {} rmfdata = {:?}", own_rank, relevant_rmf_data);
 
         let mut rank_offsets = HashMap::<u32, usize>::new();
-        for (k, _, _, _, _, _, _, _, _, _) in &remote_faces_data {
+        for (k, _, _, _, _, _, _, _, _, _, _) in &remote_faces_data {
             rank_offsets.insert(*k, 0);
         }
         
-        for (owner_rank, _, fc, bnd, c0, c1, c0glob, c1glob, c0ownrank, c1ownrank) in remote_faces_data {
+        for (owner_rank, _, _, fc, bnd, c0, c1, c0glob, c1glob, c0ownrank, c1ownrank) in remote_faces_data {
             let mut fh = vec![0; fc.len()];
             for i in 0..fh.len() {
                 fh[i] = usize::from(fc[i]);
@@ -481,7 +521,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
             if DIM == 2 {reorder_polygon_faces(faces.as_mut_slice(), &mesh);}
             let gid = cell_global_ids[i];
             mesh.add_cell(faces, crate::core::mesh::Ownership::Owned, Some(gid as u32));
-            println!("rank {} added cell {:?}", own_rank, faces);
+            //println!("rank {} added cell {:?}", own_rank, faces);
             i += 1;
         }
         for k in i..self.grid.len_with_ghosts() {

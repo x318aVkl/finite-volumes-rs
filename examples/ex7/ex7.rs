@@ -8,10 +8,6 @@ use mpi::traits::CommunicatorCollectives;
 
 fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::error::Error> {
 
-    // init the refinement context
-    // this initializes the p4est library and supresses outputs from its automated log thing
-    finite_volumes::refine::context::initialize(&world);
-
     let mut refinement: RefinementContext<DIM> = RefinementContext::read(std::fs::File::open("examples/ex7/mesh.su2")?, world.duplicate())?;
     refinement.partition();
 
@@ -20,7 +16,7 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
     println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
 
-    for level in 1..=2 {
+    for level in 1..=1 {
         if world.rank() == 0 {
             println!("=== level {} ===", level);
         }
@@ -90,8 +86,11 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
 
         let field: Field<f64, geometry::Cell, DIM> = solution.data().to_vec().to_field(&mesh);
 
+        let rank_field: Field<f64, geometry::Cell, DIM> = mesh.iter_cells().map(|_| world.rank().into()).collect::<Vec<_>>().to_field(&mesh);
+
         PvtuWriter::new(&mesh)
             .with("u", &field)
+            .with("rank", &rank_field)
             .write(format!("examples/ex7/solution_{}.pvtu", level).as_str()).unwrap();
 
     }

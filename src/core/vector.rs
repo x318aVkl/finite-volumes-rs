@@ -336,6 +336,12 @@ impl<const N: usize> Into<Vector<N>> for [f64; N] {
     }
 }
 
+impl<const N: usize> Into<[f64; N]> for Vector<N> {
+    fn into(self) -> [f64; N] {
+        self.data
+    }
+}
+
 
 impl<const N: usize> Into<Vector<N>> for &[f64] {
     fn into(self) -> Vector<N> {
