@@ -1,7 +1,7 @@
 // refine using the p4est interface
 
 use finite_volumes::fvm::assembly::assemble;
-use finite_volumes::linalg::solvers::conjugate_gradient;
+use finite_volumes::linalg::solvers::{bi_conjugate_gradient_stab, conjugate_gradient};
 use finite_volumes::prelude::*;
 use finite_volumes::refine::context::RefinementContext;
 use mpi::traits::CommunicatorCollectives;
@@ -16,7 +16,7 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
     println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
 
-    for level in 1..=3 {
+    for level in 1..=6 {
         if world.rank() == 0 {
             println!("=== level {} ===", level);
         }
@@ -39,10 +39,10 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
         refinement.coarsen(|cells| {
             let mut c = 0.;
             for i in 0..cells.len() {
-                c += cells[i].corner(0)[1];
+                c += (cells[i].corner(0)[0].powi(2) + cells[i].corner(0)[1].powi(2)).sqrt();
             }
             c /= cells.len() as f64;
-            c < 0.
+            c < 0.5
         });
         refinement.balance();
         refinement.partition();
@@ -70,19 +70,29 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
 
 
         // solve a simple poisson equation on the mesh
-        let source = mesh.iter_cells().map(|_cell| -1.0).collect::<Vec<_>>().to_field(&mesh);
-        let diffusion = mesh.iter_faces().map(|_face| 1.0).collect::<Vec<_>>().to_field(&mesh);
+        let source = mesh.iter_cells().map(|_cell| 0.0).collect::<Vec<_>>().to_field(&mesh);
+        let diffusion = mesh.iter_faces().map(|_face| 0.1).collect::<Vec<_>>().to_field(&mesh);
+        let flux = mesh.iter_faces().map(|face| {
+            let velocity = Vector::one();
+            velocity.dot(face.normal())
+        }).collect::<Vec<_>>().to_field(&mesh);
         let comm = Communicator::<geometry::Cell, DIM>::from(&mesh);
 
-        let previous = mesh.iter_cells().map(|_| 0.).collect::<Vec<_>>().to_field(&mesh);
+        let previous = mesh.iter_cells().map(|cell| {
+            if cell.center().x() < 0. {
+                1.0
+            } else {
+                0.
+            }
+        }).collect::<Vec<_>>().to_field(&mesh);
 
         let wall = mesh.patch_id("wall").unwrap();
         let bot = mesh.patch_id("bot").unwrap();
-        println!("wall = {:?}\nbot = {:?}", wall, bot);
 
         let (lhs, rhs) = assemble(
             terms::source(&source)
             + terms::time(schemes::time::Euler::new(&previous, 0.1))
+            + terms::convection(schemes::faceinterp::Upwind::new(&flux), &flux)
             - terms::laplacian(schemes::facengrad::Orthogonal::new(), &diffusion), 
             |face| {
                 if face.boundary().unwrap() == wall {
@@ -97,8 +107,8 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
         );
 
         let mut solution = DistributedVector::from_size(mesh.n_total_cells());
-        let precond = preconditioners::IncompleteCholesky::from_matrix(&lhs, 1);
-        let result = conjugate_gradient(
+        let precond = preconditioners::IncompleteLowerUpper::from_matrix(&lhs, 1);
+        let result = bi_conjugate_gradient_stab(
             &mut solution,
             &lhs,
             &rhs,
