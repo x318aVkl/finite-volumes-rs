@@ -16,7 +16,7 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
     println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
 
-    for level in 1..=1 {
+    for level in 1..=3 {
         if world.rank() == 0 {
             println!("=== level {} ===", level);
         }
@@ -63,8 +63,11 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
         let diffusion = mesh.iter_faces().map(|_face| 1.0).collect::<Vec<_>>().to_field(&mesh);
         let comm = Communicator::<geometry::Cell, DIM>::from(&mesh);
 
+        let previous = mesh.iter_cells().map(|_| 0.).collect::<Vec<_>>().to_field(&mesh);
+
         let (lhs, rhs) = assemble(
             terms::source(&source)
+            + terms::time(schemes::time::Euler::new(&previous, 0.1))
             - terms::laplacian(schemes::facengrad::Orthogonal::new(), &diffusion), 
             |_bnd| {
                 (0.0, 0.0)

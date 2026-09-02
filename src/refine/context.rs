@@ -86,26 +86,20 @@ impl<const DIM: usize> RefinementContext<DIM> {
         // });
         self.grid.map_faces(|face| {
             let ids = node_ids.face_nodes(&face);
-            println!("{:?}", ids);
             for i in 0..(2_usize.pow((DIM-1) as u32)) {
                 let c = face.corner(i);
                 let cid = ids[i];
                 if !added_nodes.contains(&cid) {
-                    println!("rank {} add node {} {:?}", own_rank, cid, c);
                     added_nodes.insert(cid);
                     if nodes_to_add.len() <= cid {
                         nodes_to_add.resize(cid + 1, Vector::one() * 42.);
                     }
                     nodes_to_add[cid] = c.into();
-                    println!("rank {} adding node {} {:?}", own_rank, cid, c);
-                } else {
-                    println!("rank {} saw again node {} {:?}", own_rank, cid, c);
                 }
             }
         });
 
         // add the nodes
-        println!("ndoes to add: {:?}", nodes_to_add);
         for node in nodes_to_add {
             mesh.add_node(node);
         }
@@ -151,7 +145,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
 
         // first add all the internal faces that are owned
         let mut cell_faces = vec![vec![]; self.grid.len_with_ghosts()];
-        let mut cell_global_ids = vec![0; self.grid.len_with_ghosts()];
+        let mut cell_global_ids = vec![usize::MAX; self.grid.len_with_ghosts()];
         let mut cell_owner_ranks = vec![None; self.grid.len_with_ghosts()];
         let mut faces_id_map = HashMap::<[usize; 3], usize>::new();
 
@@ -244,15 +238,11 @@ impl<const DIM: usize> RefinementContext<DIM> {
 
 
         let mut tosend_remote_faces_ids_only = vec![];
-        let mut tosend_remote_faces_centers_only = vec![];
-        for (_, _, _, id, fc) in &tosend_remote_faces {
+        for (_, _, _, id, _) in &tosend_remote_faces {
             tosend_remote_faces_ids_only.push(*id);
-            tosend_remote_faces_centers_only.push(*fc);
         }
 
-        println!("rank {} sending faces {:?}", own_rank, tosend_remote_faces);
-
-        let mut remote_face_ids = HashMap::<u32, Vec<usize>>::new();
+        let mut remote_face_ids = HashMap::<u32, Vec<u32>>::new();
         let mut ordered_ranks = vec![];
         {
             let mut other_ranks = HashSet::new();
@@ -297,7 +287,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
 
                     let (other_size, _) = self.mpi_comm.process_at_rank(orank as i32).receive::<usize>();
                     if other_size > 0 {
-                        remote_face_ids.insert(orank, vec![0; other_size]);
+                        remote_face_ids.insert(orank, vec![0_u32; other_size]);
                     }
                 }).count();
 
@@ -452,6 +442,11 @@ impl<const DIM: usize> RefinementContext<DIM> {
             if a.0 == b.0 {if a.1 == b.1 {a.2.cmp(&b.2)} else {a.1.cmp(&b.1)}} else {a.0.cmp(&b.0)}
         });
 
+        let mut rank_offsets = HashMap::<u32, usize>::new();
+        for (k, _, _, _, _, _, _, _, _, _, _) in &remote_faces_data {
+            rank_offsets.insert(*k, 0);
+        }
+
         let mut relevant_rmf_data = vec![];
         for entry in remote_faces_data.iter() {
             let mut fc = Vector::new();
@@ -460,10 +455,12 @@ impl<const DIM: usize> RefinementContext<DIM> {
                 fc += n;
             }
             fc /= entry.3.len() as f64;
-            relevant_rmf_data.push((entry.0, entry.1, entry.2, fc));
+            let owner_rank = entry.0;
+            let off = rank_offsets.get_mut(&owner_rank).unwrap();
+            let fgid = remote_face_ids.get(&owner_rank).unwrap()[*off];
+            *off += 1;
+            relevant_rmf_data.push((entry.0, entry.1, entry.2, fgid, fc));
         }
-
-        println!("rank {} rmfdata = {:?}", own_rank, relevant_rmf_data);
 
         let mut rank_offsets = HashMap::<u32, usize>::new();
         for (k, _, _, _, _, _, _, _, _, _, _) in &remote_faces_data {
@@ -512,7 +509,6 @@ impl<const DIM: usize> RefinementContext<DIM> {
                 cell_owner_ranks[c1] = Some(c1ownrank.unwrap());
             }
         }
-
 
         // finally, add the cells
         let mut i = 0;
