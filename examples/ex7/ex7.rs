@@ -33,7 +33,9 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
             println!("=== level {} ===", level);
         }
         world.barrier();
-        refinement.refine_uniform();
+        refinement.refine(|cell| {
+            cell.corner(0)[0] < 0.
+        });
         refinement.partition();
 
         if world.rank() == 0 { println!("done with refinement"); }
@@ -65,12 +67,22 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
 
         let previous = mesh.iter_cells().map(|_| 0.).collect::<Vec<_>>().to_field(&mesh);
 
+        let wall = mesh.patch_id("wall").unwrap();
+        let bot = mesh.patch_id("bot").unwrap();
+        println!("wall = {:?}\nbot = {:?}", wall, bot);
+
         let (lhs, rhs) = assemble(
             terms::source(&source)
             + terms::time(schemes::time::Euler::new(&previous, 0.1))
             - terms::laplacian(schemes::facengrad::Orthogonal::new(), &diffusion), 
-            |_bnd| {
-                (0.0, 0.0)
+            |face| {
+                if face.boundary().unwrap() == wall {
+                    (0.0, 0.0)
+                } else if face.boundary().unwrap() == bot {
+                    (1.0, 0.0)
+                } else {
+                    panic!("boundary face has patch {:?}", face.boundary())
+                }
             }, 
             &mesh,
         );

@@ -8,8 +8,9 @@ Line(3) = {3, 4};
 Line(4) = {4, 1};
 Curve Loop(1) = {4, 1, 2, 3};
 Plane Surface(1) = {1};
-Physical Curve("wall", 5) = {1, 2, 3, 4};
-Physical Surface("internal", 6) = {1};
+Physical Curve("wall", 5) = {2, 3, 4};
+Physical Curve("bot", 6) = {1};
+Physical Surface("internal", 7) = {1};
 
 Transfinite Curve {4, 1, 2, 3} = 3 Using Progression 1;
 Transfinite Surface {1};
