@@ -46,4 +46,44 @@ impl<const DIM: usize> RefinementContext<DIM> {
         self.grid.refine(f)
     }
 
+    pub fn coarsen<'a, F>(&'a mut self, f: F) where F: Fn([p4est::grid::cell::Cell<'_, ()>; 4]) -> bool {
+        self.grid.coarsen(f);
+    }
+
+    pub fn balance(&mut self) {
+        self.grid.balance();
+    }
 }
+
+pub fn transfer_adapt<T, FC, FR, const DIM: usize>(
+    old: &RefinementContext<DIM>, 
+    old_data: &[T], 
+    new: &RefinementContext<DIM>,
+    new_data: &mut [T],
+    coarsening_function: FC,
+    refining_function: FR,
+) -> Result<(), crate::error::Error> where T: Clone + Default,
+FC: FnMut([(p4est::grid::cell::Cell<'_, ()>, &T); 4], (p4est::grid::cell::Cell<'_, ()>, &mut T)),
+FR: FnMut((p4est::grid::cell::Cell<'_, ()>, &T), [(p4est::grid::cell::Cell<'_, ()>, &mut T); 4])
+{
+    match p4est::grid::transfer::transfer_data_custom_adapt(&old.grid, old_data, &new.grid, new_data, coarsening_function, refining_function) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(crate::error::Error::RefinementError(e)),
+    }
+}
+
+
+pub fn transfer_partition<T, const DIM: usize>(
+    old: &RefinementContext<DIM>, 
+    old_data: &[T], 
+    new: &RefinementContext<DIM>,
+    new_data: &mut [T],
+) -> Result<(), crate::error::Error> where T: Clone + Default,
+{
+    match p4est::grid::transfer::transfer_data_custom_partition(&old.grid, old_data, &new.grid, new_data) {
+        Ok(()) => Ok(()),
+        Err(e) => Err(crate::error::Error::RefinementError(e)),
+    }
+}
+
+

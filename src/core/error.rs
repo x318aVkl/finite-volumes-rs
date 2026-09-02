@@ -17,6 +17,8 @@ pub enum Error {
     MpiInitializeFailed,
 
     StdIoError(std::io::Error),
+
+    RefinementError(i32),
 }
 
 impl std::fmt::Display for Error {

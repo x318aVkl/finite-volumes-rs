@@ -36,6 +36,15 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
         refinement.refine(|cell| {
             cell.corner(0)[0] < 0.
         });
+        refinement.coarsen(|cells| {
+            let mut c = 0.;
+            for i in 0..cells.len() {
+                c += cells[i].corner(0)[1];
+            }
+            c /= cells.len() as f64;
+            c < 0.
+        });
+        refinement.balance();
         refinement.partition();
 
         if world.rank() == 0 { println!("done with refinement"); }
