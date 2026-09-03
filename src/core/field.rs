@@ -54,6 +54,10 @@ where T: Equivalence, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> 
         &self.data
     }
 
+    pub fn raw_data_mut(&mut self) -> &mut [T] {
+        &mut self.data
+    }
+
     pub fn set_from(&mut self, data: &[T]) where T: Copy {
         assert!((self.total_len() == data.len()) || (self.len() == data.len()));
         for i in 0..data.len() {

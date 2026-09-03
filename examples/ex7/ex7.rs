@@ -3,7 +3,7 @@
 use finite_volumes::fvm::assembly::assemble;
 use finite_volumes::linalg::solvers::{bi_conjugate_gradient_stab, conjugate_gradient};
 use finite_volumes::prelude::*;
-use finite_volumes::refine::context::RefinementContext;
+use finite_volumes::refine::context::{RefinementContext, transfer_field_adapt};
 use mpi::traits::CommunicatorCollectives;
 
 fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::error::Error> {
@@ -16,7 +16,7 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
     println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
 
-    for level in 1..=6 {
+    for level in 1..=3 {
         if world.rank() == 0 {
             println!("=== level {} ===", level);
         }
@@ -34,12 +34,12 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
         }
         world.barrier();
         refinement.refine(|cell| {
-            cell.corner(0)[0] < 0.
+            cell.corner(0)[1] < 0.
         });
         refinement.coarsen(|cells| {
             let mut c = 0.;
             for i in 0..cells.len() {
-                c += (cells[i].corner(0)[0].powi(2) + cells[i].corner(0)[1].powi(2)).sqrt();
+                c += ((cells[i].corner(0)[0] + 1.0).powi(2) + cells[i].corner(0)[1].powi(2)).sqrt();
             }
             c /= cells.len() as f64;
             c < 0.5
@@ -126,6 +126,56 @@ fn ex7<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::
             .with("u", &field)
             .with("rank", &rank_field)
             .write(format!("examples/ex7/solution_{}.pvtu", level).as_str()).unwrap();
+
+        // transfer fields
+        let old_refinement = refinement.clone();
+
+        let old_mesh = mesh.clone();
+
+        refinement.refine_uniform();
+        refinement.partition();
+        mesh = refinement.mesh()?;
+        
+
+        let field = transfer_field_adapt::<_, Vector<DIM>, _>(
+            &old_refinement,
+            &refinement,
+            &old_mesh,
+            &mesh,
+            field,
+            None,
+        )?;
+
+        drop(old_refinement);
+        drop(old_mesh);
+
+        let old_refinement = refinement.clone();
+
+        let old_mesh = mesh.clone();
+
+        refinement.coarsen(|_| true);
+        refinement.partition();
+        mesh = refinement.mesh()?;
+        
+
+        let field = transfer_field_adapt::<_, Vector<DIM>, _>(
+            &old_refinement,
+            &refinement,
+            &old_mesh,
+            &mesh,
+            field,
+            None,
+        )?;
+
+        drop(old_refinement);
+        drop(old_mesh);
+
+        let rank_field: Field<f64, geometry::Cell, DIM> = mesh.iter_cells().map(|_| world.rank().into()).collect::<Vec<_>>().to_field(&mesh);
+
+        PvtuWriter::new(&mesh)
+            .with("u", &field)
+            .with("rank", &rank_field)
+            .write(format!("examples/ex7/solution_{}_map.pvtu", level).as_str()).unwrap();
 
     }
 

@@ -12,6 +12,6 @@ Physical Curve("wall", 5) = {2, 3, 4};
 Physical Curve("bot", 6) = {1};
 Physical Surface("internal", 7) = {1};
 
-Transfinite Curve {4, 1, 2, 3} = 3 Using Progression 1;
+Transfinite Curve {4, 1, 2, 3} = 11 Using Progression 1;
 Transfinite Surface {1};
 Recombine Surface {1};

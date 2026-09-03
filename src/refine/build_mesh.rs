@@ -532,7 +532,15 @@ fn reorder_polygon_faces<const DIM: usize>(
             }
         }
 
-        let found = found.unwrap();
+        let found = if found.is_some() {found.unwrap()} else {
+            let mut left = vec![];
+            for j in 0..to_add.len() {
+                let p0 = mesh.node(mesh.face(to_add[j]).nodes()[0]).position();
+                let p1 = mesh.node(mesh.face(to_add[j]).nodes()[1]).position();
+                left.push((p0, p1));
+            }
+            panic!("error in reorder_polygon_faces, next node not found, previous: {:?} {:?}, left: {:?}", n0, n1, left);
+        };
 
         let fid = to_add.remove(found);
         result[i] = fid;

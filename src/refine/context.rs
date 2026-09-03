@@ -1,11 +1,24 @@
-use std::{io::Read, sync::OnceLock};
+use std::{io::Read, ops::AddAssign, sync::OnceLock};
 
-use mpi::{topology::SimpleCommunicator, traits::Communicator};
+use mpi::{topology::SimpleCommunicator, traits::{Communicator, Equivalence}};
+
+use crate::{Field, Mesh, Vector, core::mesh::{CellIndex, geometry}};
+
 
 
 pub struct RefinementContext<const DIM: usize> {
     pub(super) grid: p4est::grid::Grid<()>,
     pub(super) mpi_comm: SimpleCommunicator,
+}
+
+
+impl<const DIM: usize> Clone for RefinementContext<DIM> {
+    fn clone(&self) -> Self {
+        Self {
+            grid: self.grid.clone(),
+            mpi_comm: self.mpi_comm.duplicate(),
+        }
+    }
 }
 
 
@@ -86,4 +99,60 @@ pub fn transfer_partition<T, const DIM: usize>(
     }
 }
 
+
+pub fn transfer_field_partition<T, const DIM: usize>(
+    old_ctx: &RefinementContext<DIM>, 
+    new_ctx: &RefinementContext<DIM>,
+    new_mesh: &Mesh<DIM>,
+    old_field: Field<T, geometry::Cell, DIM>, 
+) -> Result<Field<T, geometry::Cell, DIM>, crate::error::Error> where T: Clone + Default + Equivalence,
+{   
+    let mut result = Field::from(new_mesh);
+    match p4est::grid::transfer::transfer_data_custom_partition(&old_ctx.grid, old_field.raw_data(), &new_ctx.grid, result.raw_data_mut()) {
+        Ok(()) => Ok(result),
+        Err(e) => Err(crate::error::Error::RefinementError(e)),
+    }
+}
+
+
+pub fn transfer_field_adapt<T, G, const DIM: usize>(
+    old_ctx: &RefinementContext<DIM>, 
+    new_ctx: &RefinementContext<DIM>,
+    old_mesh: &Mesh<DIM>,
+    new_mesh: &Mesh<DIM>,
+    old_field: Field<T, geometry::Cell, DIM>,
+    old_gradients: Option<&Field<G, geometry::Cell, DIM>>,
+) -> Result<Field<T, geometry::Cell, DIM>, crate::error::Error> 
+where T: Clone + Copy + Default + Equivalence + AddAssign + std::ops::Add<T, Output=T> + std::ops::Div<f64, Output = T>,
+G: Default + std::ops::Mul<Vector<DIM>, Output = T> + Copy
+{
+    let mut new_field = Field::from(new_mesh);
+
+    transfer_adapt(
+        old_ctx,
+        old_field.raw_data(),
+        new_ctx,
+        new_field.raw_data_mut(),
+        |old, new| {
+            let mut sum = T::default();
+            for (_cell, value) in old.iter() {
+                sum += (*value).clone();
+            }
+            *new.1 = sum / (old.len() as f64);
+        },
+        |old, new| {
+            let old_val = old.1.clone();
+            let old_grad = if let Some(g) = old_gradients {
+                g[CellIndex::from(old.0.local_id)]
+            } else {G::default()};
+            for (cell, value) in new {
+                let delta = new_mesh.cell(CellIndex::from(cell.local_id)).center() - old_mesh.cell(CellIndex::from(old.0.local_id)).center();
+                let delta = old_grad * delta;
+                *value = old_val + delta;
+            }
+        }
+    )?;
+
+    Ok(new_field)
+}
 
