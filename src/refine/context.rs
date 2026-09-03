@@ -56,7 +56,7 @@ impl<const DIM: usize> RefinementContext<DIM> {
     }
 
     pub fn refine<'a, F>(&'a mut self, f: F) where F: Fn(p4est::grid::cell::Cell<'a, ()>) -> bool {
-        self.grid.refine(f)
+        self.grid.refine(f);
     }
 
     pub fn coarsen<'a, F>(&'a mut self, f: F) where F: Fn([p4est::grid::cell::Cell<'_, ()>; 4]) -> bool {
