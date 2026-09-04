@@ -2,13 +2,13 @@ use std::collections::{HashMap, HashSet};
 
 use mpi::{traits::{Communicator, CommunicatorCollectives, Destination, Source}};
 
-use crate::{Mesh, Vector, core::mesh::{FaceIndex, NodeIndex}, refine::context::RefinementContext};
+use crate::{Mesh, Vector, core::mesh::{FaceIndex, NodeIndex}, refine::context::RefinementMesh};
 
 
 
-impl<const DIM: usize> RefinementContext<DIM> {
+impl<const DIM: usize> RefinementMesh<DIM> {
 
-pub fn mesh(&self) -> Result<Mesh<DIM>, crate::error::Error> {
+pub fn build_mesh(&self) -> Result<Mesh<DIM>, crate::error::Error> {
         assert!(DIM == p4est::consts::DIM);
 
         let own_rank = self.mpi_comm.rank() as u32;

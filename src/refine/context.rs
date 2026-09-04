@@ -6,13 +6,13 @@ use crate::{Field, Mesh, Vector, core::mesh::{CellIndex, geometry}};
 
 
 
-pub struct RefinementContext<const DIM: usize> {
+pub struct RefinementMesh<const DIM: usize> {
     pub(super) grid: p4est::grid::Grid<()>,
     pub(super) mpi_comm: SimpleCommunicator,
 }
 
 
-impl<const DIM: usize> Clone for RefinementContext<DIM> {
+impl<const DIM: usize> Clone for RefinementMesh<DIM> {
     fn clone(&self) -> Self {
         Self {
             grid: self.grid.clone(),
@@ -33,7 +33,7 @@ pub fn initialize(world: &SimpleCommunicator) {
 }
 
 
-impl<const DIM: usize> RefinementContext<DIM> {
+impl<const DIM: usize> RefinementMesh<DIM> {
     pub fn read<T: Read>(source: T, mpi_comm: SimpleCommunicator) -> Result<Self, crate::error::Error> {
         assert!(DIM == p4est::consts::DIM);
 
@@ -69,9 +69,9 @@ impl<const DIM: usize> RefinementContext<DIM> {
 }
 
 pub fn transfer_adapt<T, FC, FR, const DIM: usize>(
-    old: &RefinementContext<DIM>, 
+    old: &RefinementMesh<DIM>, 
     old_data: &[T], 
-    new: &RefinementContext<DIM>,
+    new: &RefinementMesh<DIM>,
     new_data: &mut [T],
     coarsening_function: FC,
     refining_function: FR,
@@ -87,9 +87,9 @@ FR: FnMut((p4est::grid::cell::Cell<'_, ()>, &T), [(p4est::grid::cell::Cell<'_, (
 
 
 pub fn transfer_partition<T, const DIM: usize>(
-    old: &RefinementContext<DIM>, 
+    old: &RefinementMesh<DIM>, 
     old_data: &[T], 
-    new: &RefinementContext<DIM>,
+    new: &RefinementMesh<DIM>,
     new_data: &mut [T],
 ) -> Result<(), crate::error::Error> where T: Clone + Default,
 {
@@ -101,8 +101,8 @@ pub fn transfer_partition<T, const DIM: usize>(
 
 
 pub fn transfer_field_partition<T, const DIM: usize>(
-    old_ctx: &RefinementContext<DIM>, 
-    new_ctx: &RefinementContext<DIM>,
+    old_ctx: &RefinementMesh<DIM>, 
+    new_ctx: &RefinementMesh<DIM>,
     new_mesh: &Mesh<DIM>,
     old_field: Field<T, geometry::Cell, DIM>, 
 ) -> Result<Field<T, geometry::Cell, DIM>, crate::error::Error> where T: Clone + Default + Equivalence,
@@ -116,8 +116,8 @@ pub fn transfer_field_partition<T, const DIM: usize>(
 
 
 pub fn transfer_field_adapt<T, G, const DIM: usize>(
-    old_ctx: &RefinementContext<DIM>, 
-    new_ctx: &RefinementContext<DIM>,
+    old_ctx: &RefinementMesh<DIM>, 
+    new_ctx: &RefinementMesh<DIM>,
     old_mesh: &Mesh<DIM>,
     new_mesh: &Mesh<DIM>,
     old_field: Field<T, geometry::Cell, DIM>,

@@ -4,6 +4,9 @@ pub mod context;
 
 pub mod build_mesh;
 
+pub mod amr;
 
-pub use context::{transfer_adapt, transfer_partition};
+
+pub use context::RefinementMesh;
+pub use amr::AMRHandler;
 
