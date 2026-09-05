@@ -1,132 +1,234 @@
 /*
+
     Example 4
 
-    Refine a mesh using adaptive mesh refinement
+    refine using the p4est interface
 
 */
 
-use finite_volumes::{fvm::{assembly::assemble, bcs::FaceConstraints, schemes, terms, tools::{gradients::compute_gradients, limiters::compute_limiters}}, prelude::*};
+use finite_volumes::fvm::assembly::assemble;
+use finite_volumes::fvm::tools::gradients::compute_gradients;
+use finite_volumes::fvm::tools::limiters::compute_limiters;
+use finite_volumes::linalg::solvers::{bi_conjugate_gradient_stab};
+use finite_volumes::prelude::*;
+use finite_volumes::refine::amr::AMRHandler;
+use finite_volumes::refine::context::RefinementMesh;
+use mpi::traits::CommunicatorCollectives;
+
+fn ex4<const DIM: usize>(world: MpiCommunicator,) -> Result<(), finite_volumes::error::Error> {
+
+    let dt = 0.01;
+    let mu = 1e-5;
+
+    let mut refinement: RefinementMesh<DIM> = RefinementMesh::read(std::fs::File::open("examples/ex4/mesh.su2")?, world.duplicate())?;
+    refinement.partition();
+
+    let mut mesh = refinement.build_mesh()?;
+    println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
 
-
-fn ex4<const DIM: usize>() -> Result<(), finite_volumes::error::Error> {
-
-    // create the mesh
-    let mesh: Mesh<DIM> = Mesh::read(std::fs::File::open("examples/ex4/mesh.msh").unwrap(), None).unwrap();
-
-    //let point = Vector::unit() * 0.5;
-
-    // for i in 0..2 {
-    //     mesh = mesh_refinement
-    //         .set_criteria(|cell| {
-    //             1.0
-    //         })
-    //         .set_level(0.5)
-    //         .refine();
-
-    //     println!("Level {}, ncells = {}", i, mesh.n_cells());
-    // }
-
-    let mut velocity = Vector::zero();
-    velocity[1] = 1.0;
-    let velocity = velocity;
-
-    let mut face_constraints = FaceConstraints::from(&mesh);
-    for patch in mesh.iter_patch() {
-        for face in patch.iter() {
-            face_constraints[face.id()] = 
-            if face.center().x().min(face.center().y()).min(face.center().z()).abs() < 1e-10 {
-                // zero gradient
-                (1.0, 0.0)
-            } else {
-                // fixed value of zero
-                let x = face.center().x() - 0.5;
-                let t = (x*100.0).tanh();
-                let fv = t;
-                (0.0, 0.0)
-            };
+    for level in 1..=3 {
+        if world.rank() == 0 {
+            println!("=== level {} ===", level);
         }
+        refinement.refine_uniform();
+        refinement.partition();
+
+        if world.rank() == 0 { println!("done with refinement"); }
+        world.barrier();
     }
 
-    let mut u = Field::<f64, geometry::Cell, DIM>::from(&mesh);
+    mesh = refinement.build_mesh()?;
+    println!("rank {} base mesh size: {}", world.rank(), mesh.n_cells());
 
-    // adaptive mesh refinement loops
-    for refinements in 0..20 {
+    // build the solution field
+    let mut field: Field<f64, geometry::Cell, DIM> = mesh.iter_cells().map(|cell| {
+        if cell.center().x() < 0. {0.} else {0.}
+    }).collect::<Vec<_>>().to_field(&mesh);
 
-        let mut source = Field::<f64, geometry::Cell, DIM>::from(&mesh);
-        let mut mu = Field::<f64, geometry::Face, DIM>::from(&mesh);
-        let mut phi = Field::<f64, geometry::Face, DIM>::from(&mesh);
-
-        let mut refcriteria = Field::<f64, geometry::Cell, DIM>::from(&mesh);
-
-        for cell in mesh.iter_cells() {
-            let r = cell.center().norm() / 0.5;
-            source[cell.id()] = if (1.0 -r).abs() < 0.1 {10.0} else {0.0};
+    let mut source = mesh.iter_cells().map(|cell| {
+        let mut c = Vector::new();
+        c[1] += 0.5;
+        if (cell.center() - c).norm() < 0.05 {
+            1.
+        } else {
+            0.
         }
+    }).collect::<Vec<_>>().to_field(&mesh);
+    let mut diffusion = mesh.iter_faces().map(|_face| mu).collect::<Vec<_>>().to_field(&mesh);
+    let mut flux = mesh.iter_faces().map(|face| {
+        let mut velocity = Vector::one();
+        velocity[0] = -face.center()[1];
+        velocity[1] = face.center()[0];
+        velocity /= velocity.norm();
+        velocity.dot(face.normal())
+    }).collect::<Vec<_>>().to_field(&mesh);
 
-        for face in mesh.iter_faces() {
-            mu[face.id()] = 1.0;
-            phi[face.id()] = velocity.dot(face.normal());
+    let mut comm = Communicator::<geometry::Cell, DIM>::from(&mesh);
+
+    // let wall = mesh.patch_id("wall").unwrap();
+    // let bot = mesh.patch_id("bot").unwrap();
+
+    let mut time = 0.;
+
+    let mut write_iter = 0;
+
+    let bc = |flux: &Field<f64, geometry::Face, DIM>| {
+        let f = flux.clone();
+        move |face: &FaceRef<DIM>| {
+            if f[face.id()] < 0.0 {
+                // flux enters, inlet
+                (0.0, 0.0)
+            } else {
+                (1.0, 0.0)
+            }
         }
+    };
 
-        let schemes = DynamicSchemeSet::default()
-            .with(SchemeType::FaceNormalGradient, "orthogonal")
-            .with(SchemeType::FaceInterpolation, "upwind");
+    for time_iter in 1..=1000 {
+        if world.rank() == 0 {println!("=== iter {}, time {} ===", time_iter, time);}
+        // if world.rank() == 0 {
+        //     println!("=== level {} ===", level);
+        // }
+        // refinement.refine(|cell| {
+        //     cell.corner(0)[1] < 0.
+        // });
+        // refinement.coarsen(|cells| {
+        //     let mut c = 0.;
+        //     for i in 0..cells.len() {
+        //         c += ((cells[i].corner(0)[0] + 1.0).powi(2) + cells[i].corner(0)[1].powi(2)).sqrt();
+        //     }
+        //     c /= cells.len() as f64;
+        //     c < 0.5
+        // });
+        // refinement.balance();
+        // refinement.partition();
 
-        let (
-            lhs, 
-            rhs
-        ) = assemble::<_, f64, _, _>(
-                    terms::source(&source)
-                - terms::laplacian(
-                schemes.facengrad::<_, _, Vector<DIM>, _>(None),
-                &mu,
-                )
-                // + terms::convection(
-                //     schemes.faceinterp(Some(&phi), None),
-                //     &phi
-                // )
-            ,
-            face_constraints.as_bc(),    // zero value on all boundaries
+        // if world.rank() == 0 { println!("done with refinement"); }
+        // world.barrier();
+
+        // mesh = refinement.build_mesh()?;
+
+        // total area
+
+        // solve a simple poisson equation on the mesh
+        let previous = field.clone();
+
+        let mut grads = Field::from(&mesh);
+        compute_gradients(
+            &mut grads,
+            &field,
+            bc(&flux),
+            &mesh
+        );
+
+        let mut limiter = Field::from(&mesh);
+        compute_limiters::<f64, Vector<DIM>, f64, f64, f64, f64, DIM>(
+            &mut limiter,
+            &field,
+            &grads,
+            schemes::limiters::LimitedLinear(1.0),
+            schemes::faceinterp::Upwind::new(&flux),
+            schemes::facengrad::Corrected::new(&grads, 1.0),
+            bc(&flux),
             &mesh,
         );
 
-        let mut solution = DistributedVector::from_data(u.raw_data());
+        let (lhs, rhs) = assemble(
+            terms::time(schemes::time::Euler::new(&previous, dt))
+            + terms::convection(schemes::faceinterp::LimitedLinear::new(&flux, &limiter), &flux)
+            - terms::laplacian(schemes::facengrad::Corrected::new(&grads, 1.0), &diffusion)
+            - terms::source(&source), 
+            bc(&flux),
+            &mesh,
+        );
 
-        let comm = Communicator::<geometry::Cell, _>::from(&mesh);
-
-        let precond = IncompleteLowerUpper::from_matrix(&lhs, 1);
-        let result = solvers::bi_conjugate_gradient_stab(
+        let mut solution = DistributedVector::from_size(mesh.n_total_cells());
+        let precond = preconditioners::IncompleteLowerUpper::from_matrix(&lhs, 1);
+        let result = bi_conjugate_gradient_stab(
             &mut solution,
             &lhs,
             &rhs,
             &precond,
             &comm,
             LinearSolverOptions::default(),
-        ).unwrap();
+        )?;
+        if world.rank() == 0 {println!("solved poisson equation: {}", result);}
 
-        println!("solved: {}", result);
+        time += dt;
 
-        u.set_from(solution.data());
+        field.set_from(solution.data());
 
-        let mut gradients = Field::from(&mesh);
-        compute_gradients(&mut gradients, &u, face_constraints.as_bc(), &mesh);
+        if time_iter % 25 == 0 {
+            PvtuWriter::new(&mesh)
+                .with("u", &field)
+                .write(format!("examples/ex4/data/solution_{}.pvtu", write_iter).as_str()).unwrap();
+            write_iter += 1;
+        }
+
+        if (time_iter % 3 == 0) || (time_iter < 10) {
+            // refine
+            let mut grad = Field::<Vector<DIM>, geometry::Cell, DIM>::from(&mesh);
+
+            compute_gradients(&mut grad, &field, bc(&flux), &mesh);
+
+            let max_gradn = mesh.iter_cells().map(|cell| {grad[cell.id()].norm()}).reduce(|a, b| a.max(b)).unwrap();
+            let max_gradn = comm.single().reduce_max(max_gradn);
+            if world.rank() == 0 {println!("max gradn = {}", max_gradn)};
+
+            let criteria = mesh.iter_cells().map(|cell| {
+                (grad[cell.id()].norm() / max_gradn).powf(0.1)
+            }).collect::<Vec<_>>().to_field(&mesh);
 
 
-        // write the mesh
-        PvtuWriter::new(&mesh)
-            .with("u", &u)
-            .with("criteria", &refcriteria)
-            .with("source", &source)
-            .write(format!("examples/ex4/solution_{}.pvtu", refinements).as_str()).unwrap();
+            (refinement, mesh) = AMRHandler::new(
+                refinement,
+                mesh,
+                criteria
+            )
+            .with_tolerances(0.5, 0.1)
+            .with_levels(6, 1)
+            .with_transfer(|t| {
+                field = t.transfer_field_linear(field.clone(), &grad)?;
 
+                Ok(())
+            })
+            .apply()?;
+
+            let new_ncells = comm.single().reduce_add(mesh.n_cells());
+            if world.rank() == 0 {println!("number of cells: {}", new_ncells)}
+
+
+            source = mesh.iter_cells().map(|cell| {
+                let mut c = Vector::new();
+                c[1] += 0.5;
+                if (cell.center() - c).norm() < 0.05 {
+                    1.
+                } else {
+                    0.
+                }
+            }).collect::<Vec<_>>().to_field(&mesh);
+            diffusion = mesh.iter_faces().map(|_face| mu).collect::<Vec<_>>().to_field(&mesh);
+            flux = mesh.iter_faces().map(|face| {
+                let mut velocity = Vector::one();
+                velocity[0] = -face.center()[1];
+                velocity[1] = face.center()[0];
+                velocity /= velocity.norm();
+                velocity.dot(face.normal())
+            }).collect::<Vec<_>>().to_field(&mesh);
+
+            comm = Communicator::from(&mesh);
+
+        }
     }
 
     Ok(())
 }
 
 
-
 fn main() -> Result<(), finite_volumes::error::Error> {
-    ex4::<3>()
+    let universe = mpi::initialize().unwrap();
+    let world = universe.world();
+
+    ex4::<2>(world)
 }

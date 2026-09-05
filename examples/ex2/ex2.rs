@@ -5,8 +5,6 @@
 
 */
 
-mod momentum;
-mod pressure;
 
 use std::collections::HashMap;
 
@@ -41,7 +39,7 @@ impl<const DIM: usize> BoundaryConditionSet<DIM> {
     fn get(&self, bid: PatchIndex) -> Option<&BoundaryCondition<DIM>> {
         self.bcs.get(&bid)
     }
-    fn velocity<'a>(&'a self)-> impl Fn(&FaceRef<'a, DIM>) -> (f64, Vector<DIM>) {
+    fn velocity<'a>(&'a self)-> impl Fn(&FaceRef<'_, DIM>) -> (f64, Vector<DIM>) {
         |face| {
             let bid = face.boundary().unwrap();
             match self.get(bid).unwrap() {
@@ -60,7 +58,7 @@ impl<const DIM: usize> BoundaryConditionSet<DIM> {
             }
         }
     }
-    fn pressure<'a>(&'a self) -> impl Fn(&FaceRef<'a, DIM>) -> (f64, f64) {
+    fn pressure<'a>(&'a self) -> impl Fn(&FaceRef<'_, DIM>) -> (f64, f64) {
         |face| {
             let bid = face.boundary().unwrap();
             match self.get(bid).unwrap() {
@@ -131,9 +129,12 @@ fn ex2<const DIM: usize>(
     let mut hbyan_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
     let mut ainv_face = Field::<f64, geometry::Face, DIM>::from(&mesh);
 
+    let mut velocity_lims = Field::<f64, geometry::Face, DIM>::from(&mesh);
+
+    let viscosity = mesh.iter_faces().map(|_| viscosity).collect::<Vec<_>>().to_field(&mesh);
 
     // init the velocity gradient
-    momentum::compute_velocity_gradients(&mut velocity_gradient, &velocity, &mesh, bcs.velocity());
+    tools::gradients::compute_gradients(&mut velocity_gradient, &velocity, bcs.velocity(), &mesh);
 
     // create a communicator
     let comm = Communicator::<geometry::Cell, _>::from(&mesh);
@@ -145,21 +146,31 @@ fn ex2<const DIM: usize>(
         old_velocity.set_from(velocity.raw_data());
 
         // assemble the momentum equation
-        let (mlhs, mrhs) = momentum::assemble_momentum_equation(
-            &mesh, 
-            &velocity, 
-            &velocity_gradient, 
-            &phi, 
-            viscosity, 
-            dt,
+        tools::limiters::compute_limiters::<Vector<DIM>, Matrix<DIM, DIM>, f64, Vector<DIM>, f64, f64, DIM>(
+            &mut velocity_lims,
+            &velocity,
+            &velocity_gradient,
+            schemes::limiters::LimitedLinear(1.0),
+            schemes::faceinterp::Upwind::new(&phi),
+            schemes::facengrad::Corrected::new(&velocity_gradient, 1.0),
             bcs.velocity(),
-        )?;
+            &mesh,
+        );
+
+        let (mlhs, mrhs) = assembly::assemble(
+            terms::time::time(schemes::time::Euler::new(&velocity, dt))
+            + terms::convection(schemes::faceinterp::LimitedLinear::new(&phi, &velocity_lims), &phi)
+            - terms::laplacian(schemes::facengrad::Corrected::new(&velocity_gradient, 1.0),&viscosity)
+            ,
+            bcs.velocity(),
+            &mesh,
+        );
         
         let npcorr = 3;
         for pcorr in 0..npcorr {
 
             // compute hbya and ainv
-            pressure::compute_hbya_ainv(
+            tools::hbya::compute_hbya_ainv(
                 &mut hbya, 
                 &mut ainv, 
                 &velocity, 
@@ -169,28 +180,31 @@ fn ex2<const DIM: usize>(
             );
 
             // interpolate it on the faces
-            pressure::intepolate_hbya_ainv_faces(
+            tools::hbya::intepolate_hbya_ainv_faces::<f64, DIM>(
                 &mut hbyan_face, 
                 &mut ainv_face, 
                 &hbya, 
                 &ainv, 
                 bcs.velocity(),
+                bcs.pressure(), 
+                schemes::faceinterp::Linear::new(), 
+                schemes::faceinterp::Linear::new(), 
+                &mesh
+            );
+        
+            // assemble the pressure equation
+            let (plhs, prhs) = assembly::assemble(
+                terms::divergence::<f64, f64, f64, DIM>(&hbyan_face)
+                - terms::laplacian(schemes::facengrad::Corrected::new(&pressure_gradient, 1.0), &ainv_face)
+                ,
                 bcs.pressure(),
                 &mesh
             );
 
-            // assemble the pressure equation
-            let (plhs, prhs) = pressure::assemble_pressure_equation(
-                &hbyan_face, 
-                &ainv_face, 
-                bcs.pressure(),
-                &mesh
-            )?;
-
             // solve the pressure equation
             {
                 let mut solution = DistributedVector::from_data(pressure.raw_data());
-                let precond = IncompleteCholesky::from_matrix(&plhs, 2);
+                let precond = IncompleteCholesky::from_matrix(&plhs, 1);
                 let result = solvers::conjugate_gradient(
                     &mut solution, 
                     &plhs, 
@@ -205,8 +219,8 @@ fn ex2<const DIM: usize>(
                         }
                     } else {
                         LinearSolverOptions {
-                            relative_tolerance: 1.0,
-                            absolute_tolerance: 0.1,
+                            relative_tolerance: 0.01,
+                            absolute_tolerance: 1e-6,
                             max_iterations: 200,
                         }
                     },
@@ -216,38 +230,40 @@ fn ex2<const DIM: usize>(
             }
             
             // compute pressure gradient
-            pressure::compute_pressure_gradients(
+            tools::gradients::compute_gradients(
                 &mut pressure_gradient, 
                 &pressure, 
-                bcs.pressure(),
+                &bcs.pressure(), 
                 &mesh
             );
 
+
             // correct the velocity
-            pressure::correct_velocity(
+            tools::hbya::correct_velocity(
                 &mut velocity, 
                 &hbya, 
                 &ainv, 
                 &pressure_gradient, 
-                &mesh,
+                &mesh
             );
         }
 
         // finished, correct face flux and velocity gradients
-        pressure::correct_phi(
+        tools::hbya::correct_phi(
             &mut phi, 
             &hbyan_face, 
             &ainv_face, 
             &pressure, 
+            schemes::facengrad::Corrected::new(&pressure_gradient, 1.0),
             bcs.pressure(),
             &mesh
         );
 
-        momentum::compute_velocity_gradients(
+        tools::gradients::compute_gradients(
             &mut velocity_gradient, 
             &velocity, 
+            bcs.velocity(),
             &mesh, 
-            bcs.velocity()
         );
         
 
@@ -294,11 +310,11 @@ fn main() -> Result<(), finite_volumes::error::Error> {
         }
     };
 
-    ex2::<3>(
+    ex2::<2>(
         problem,
         world,
         1.0 / 1000.0,
-        0.05,
+        0.1,
         1000,
     )?;
 

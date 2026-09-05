@@ -42,6 +42,19 @@ where T: Equivalence, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> 
         self.comm.collect(&mut self.data);
     }
 
+    pub fn set_from(&mut self, data: &[T]) where T: Copy {
+        assert!((self.total_len() == data.len()) || (self.len() == data.len()));
+        for i in 0..data.len() {
+            self.data[i] = data[i];
+        }
+        self.update();
+    }
+
+}
+
+
+impl<'a, I, T, G: Geometry<DIM, IndexType = I>, const DIM: usize> Field<T, G, DIM> {
+
     pub fn len(&self) -> usize {
         self.local_len
     }
@@ -56,14 +69,6 @@ where T: Equivalence, Mesh<DIM>: MeshGet<'a, I>, I: From<usize>, usize: From<I> 
 
     pub fn raw_data_mut(&mut self) -> &mut [T] {
         &mut self.data
-    }
-
-    pub fn set_from(&mut self, data: &[T]) where T: Copy {
-        assert!((self.total_len() == data.len()) || (self.len() == data.len()));
-        for i in 0..data.len() {
-            self.data[i] = data[i];
-        }
-        self.update();
     }
 
     pub fn communicator(&self) -> &Communicator<G, DIM> {

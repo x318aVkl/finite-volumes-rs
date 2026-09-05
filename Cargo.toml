@@ -16,7 +16,7 @@ serde = { version = "1.0", optional = true, features = ["derive"] }
 p4est = { git = "https://github.com/x318aVkl/p4est-rs", optional = true }
 
 [features]
-default = ["refine"]
+default = []
 serde = ["dep:serde"]
 refine = ["dep:p4est"]
 
@@ -47,6 +47,7 @@ path = "examples/ex3/ex3.rs"
 [[example]]
 name = "ex4"
 path = "examples/ex4/ex4.rs"
+required-features = ["refine"]
 
 [[example]]
 name = "ex5"
@@ -55,10 +56,6 @@ path = "examples/ex5/ex5.rs"
 [[example]]
 name = "ex6"
 path = "examples/ex6/ex6.rs"
-
-[[example]]
-name = "ex7"
-path = "examples/ex7/ex7.rs"
 
 
 

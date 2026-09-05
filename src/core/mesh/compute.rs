@@ -1,7 +1,5 @@
 use std::collections::HashSet;
 
-use mpi::traits::Communicator;
-
 use crate::core::{Matrix, Mesh, Vector, error::Error, mesh::{CellData, CellIndex, FaceData, FaceIndex, InternalFaceNeighbor, NodeIndex}, traits::Zero, vector::Normal};
 
 

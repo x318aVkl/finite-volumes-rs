@@ -44,10 +44,10 @@ Curve Loop(5) = {12, 15, -11, -10};
 Plane Surface(5) = {5};
 Curve Loop(6) = {6, 14, -16, -11};
 Plane Surface(6) = {6};
-Transfinite Curve {8, 9, 10, 4, 15, 17, 16, 18, 6, 2} = 60 Using Progression 1;
-Transfinite Curve {14, 11, 12, 13} = 30 Using Progression 1;
-Transfinite Curve {-1, 7} = 20 Using Progression 1.035;
-Transfinite Curve {3, -5} = 60 Using Progression 1.02;
+Transfinite Curve {8, 9, 10, 4, 15, 17, 16, 18, 6, 2} = 3 Using Progression 1;
+Transfinite Curve {14, 11, 12, 13} = 2 Using Progression 1;
+Transfinite Curve {-1, 7} = 2 Using Progression 1.035;
+Transfinite Curve {3, -5} = 3 Using Progression 1.02;
 Transfinite Surface {1};
 Transfinite Surface {2};
 Transfinite Surface {4};
@@ -57,7 +57,7 @@ Transfinite Surface {3};
 Recombine Surface {1, 3, 4, 5, 6, 2};
 //+
 Extrude {0, 0, 1} {
-  Surface{1}; Surface{3}; Surface{5}; Surface{2}; Surface{4}; Surface{6}; Layers {60}; Recombine;
+  Surface{1}; Surface{3}; Surface{5}; Surface{2}; Surface{4}; Surface{6}; Layers {2}; Recombine;
 }
 //+
 Translate {0, 0, -0.5} {
@@ -73,3 +73,5 @@ Physical Surface("wall", 153) = {119, 75, 145, 57};
 Physical Surface("sides", 154) = {31, 127, 105, 97, 137, 39, 2, 106, 5, 84, 6, 150, 3, 62, 1, 40, 4, 128};
 //+
 Physical Volume("internal", 155) = {1, 2, 3, 4, 6, 5};
+
+Mesh.ElementOrder = 2;
